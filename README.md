@@ -1,10 +1,10 @@
 # Spatial Aggregations Homie
 
-Polygon Index for spatial aggregations
+Polygon Index / Linstring Index for spatial aggregations
 
 Geospatial problems are hard, especially when having to relatee a set of geometries (lines or polygons) to a substantial set of points, traditional methodologies essentially are infeasible over 100k + points without huge computing time lost. The solution is pretty simple remove geometry entirely from the operation. Like many things in CS this trades precomputation time of the indexs with the performence boost of using said indicies. 
 
-So something to keep in mind is typical geometric comparisions might make me feel good, aren't really fair when comparing it to indexing a dictionary a few times at the maximum. This algorithm takes an area or set of area (which can be complex) and creates a multi-dimmensional dictionary of different levels. For each area in an index in contains a 2-hash level precision meaning it carries to levels of geohashs within the dictionary. To decide which size is optimal rough approximations are done to hopefully get a dense enough area covered by the geohash so that the error is considerabily negligable, +/- 3 % of the area max but usually under 1 %. (I should calculate it.)
+So something to keep in mind is typical geometric comparisions aren't really fair when comparing it to indexing a dictionary a few times at the maximum. This algorithm takes an area or set of area (which can be complex) and creates a multi-dimmensional dictionary of different levels. For each area in an index in contains a 2-hash or 3-hash level precision meaning it carries to levels of geohashs within the dictionary. To decide which size is optimal rough approximations are done to hopefully get a dense enough area covered by the geohash so that the error is considerabily negligable, +/- 3 % of the area max but usually under 1 %. If you wish to trade computation for tailing area coverage its very easy to do so, and get as much accuracy as you want. (for polygons at least)
 
 ![](https://cloud.githubusercontent.com/assets/10904982/18169911/3bf81a7a-702a-11e6-846d-45b3841b48ca.png)
 
