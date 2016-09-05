@@ -1,2 +1,3 @@
-from line_aggregations import *
-from squares_index import *
+from polygon_ind import *
+from poly_dict import *
+from line_index import *

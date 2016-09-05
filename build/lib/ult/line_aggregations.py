@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 import geohash
 import math
+import berrl as bl
 
 #takes a list and turns it into a datafrae
 def list2df(df):
@@ -503,6 +504,214 @@ def extend_geohashed_table2(header,extendrow,precision,**kwargs):
 		return newtable
 	return np.unique(newtable['GEOHASH']).tolist()
 
+# extends a new table down from a post gis row and header
+def extend_geohashed_table3(header,extendrow,precision,**kwargs):
+	count=0
+	newheader=[]
+	newvalues=[]
+	return_dataframe = False
+	for key,value in kwargs.iteritems():
+		if key == 'return_dataframe':
+			if value == True:
+				return_dataframe = True
+
+
+	for a,b in itertools.izip(header,extendrow):
+		if a=='st_asewkt':
+			geometrypos=count
+		elif a=='geom':
+			pass
+		else:
+			newheader.append(a)
+			newvalues.append(b)
+		count+=1
+
+	# adding values to newheader that were in the text geometry
+	newheader=newheader+['LAT','LONG','DISTANCE','GEOHASH']
+	
+	# parsing through the text geometry to yield what will be rows
+	geometry=extendrow[geometrypos]
+	geometry=str.split(geometry,'(')
+	geometry=geometry[-1]
+	geometry=str.split(geometry,')')
+	geometry=geometry[:-2][0]
+	geometry=str.split(geometry,',')
+
+	count = 0
+
+	points = [['LONG','LAT']]
+	# setting up new table that will be returned as a dataframe
+	newtable=[newheader]
+	for row in geometry:
+		row=str.split(row,' ')
+		distance=float(row[-1])
+		lat=float(row[1])
+		long=float(row[0])
+		point = [long,lat]
+		points.append(point)
+	# iterating through each intial point in the alignment to add definition
+	for row in points[1:]:
+		lat = row[1]
+		long = row[0]
+
+		if count == 0: 
+			count = 1
+			hash = geohash.encode(float(lat), float(long), precision)
+			newrow=newvalues+[lat,long,distance,hash]
+			newtable.append(newrow)	
+		else:
+			hash = geohash.encode(float(lat), float(long), precision)
+			# logic for checking distance between last point 
+			# then adding points that make up the points in between the two values
+			newrow=newvalues+[lat,long,distance,hash]
+
+			oldpoint = getlatlong(newheader,oldrow)
+			newpoint = getlatlong(newheader,newrow)
+			distance = ((newpoint[0] - oldpoint[0])**2 + (newpoint[1] - oldpoint[1])**2)**.5
+			distance = abs(distance)
+			linevars = get_linear_line_vars(oldpoint,newpoint)
+
+			# checking line vars
+			if linevars[0] == 0:
+				distance = 0
+			
+
+			if distance >= .0001:
+				# getting the linevars (slope and b) and then getting the degrees
+				
+				deginrad = math.atan(linevars[0])
+				pointstoadd = []
+
+				# the step size of each iteration for x and y 
+				xstep =  .0001 * math.cos(deginrad)
+				ystep =  .0001 * math.sin(deginrad)
+				# getting the current vlaues of x and y 
+				currentx = oldpoint[0]
+				currenty = oldpoint[1]
+
+
+				# checking to see whether or not xstep and y step needs to be inverted to 
+				# to reach desired point
+				if oldpoint[1] < newpoint[1] and ystep < 0:
+					xstep = xstep*-1
+					ystep = ystep*-1
+
+				# iterating through the distance and adding points at the needed precision
+				currentdistance = 0
+				while currentdistance < distance:
+					currentdistance += .0001
+					currentx += xstep
+					currenty += ystep
+					hash = geohash.encode(float(currenty), float(currentx), precision)
+					pointstoadd.append(newvalues+[currenty,currentx,0,hash])
+				
+				if len(pointstoadd)==2:
+					if distance > .0002:
+						newtable += pointstoadd	
+				else: 
+					newtable += pointstoadd
+
+					
+				newtable.append(newrow)
+		oldrow = newrow
+	# making polygon and boxing in just created polygon
+	points = get_polygon_fromline(points)
+	for row in points[1:]:
+		lat = row[1]
+		long = row[0]
+
+		if count == 0: 
+			count = 1
+			hash = geohash.encode(float(lat), float(long), precision)
+			newrow=newvalues+[lat,long,distance,hash]
+			newtable.append(newrow)	
+		else:
+			hash = geohash.encode(float(lat), float(long), precision)
+			# logic for checking distance between last point 
+			# then adding points that make up the points in between the two values
+			newrow=newvalues+[lat,long,distance,hash]
+
+			oldpoint = getlatlong(newheader,oldrow)
+			newpoint = getlatlong(newheader,newrow)
+			distance = ((newpoint[0] - oldpoint[0])**2 + (newpoint[1] - oldpoint[1])**2)**.5
+			distance = abs(distance)
+			linevars = get_linear_line_vars(oldpoint,newpoint)
+
+			# checking line vars
+			if linevars[0] == 0:
+				distance = 0
+			
+
+			if distance >= .0001:
+				# getting the linevars (slope and b) and then getting the degrees
+				
+				deginrad = math.atan(linevars[0])
+				pointstoadd = []
+
+				# the step size of each iteration for x and y 
+				xstep =  .0001 * math.cos(deginrad)
+				ystep =  .0001 * math.sin(deginrad)
+				# getting the current vlaues of x and y 
+				currentx = oldpoint[0]
+				currenty = oldpoint[1]
+
+
+				# checking to see whether or not xstep and y step needs to be inverted to 
+				# to reach desired point
+				if oldpoint[1] < newpoint[1] and ystep < 0:
+					xstep = xstep*-1
+					ystep = ystep*-1
+
+				# iterating through the distance and adding points at the needed precision
+				currentdistance = 0
+				while currentdistance < distance:
+					currentdistance += .0001
+					currentx += xstep
+					currenty += ystep
+					hash = geohash.encode(float(currenty), float(currentx), precision)
+					pointstoadd.append(newvalues+[currenty,currentx,0,hash])
+				
+				if len(pointstoadd)==2:
+					if distance > .0002:
+						newtable += pointstoadd	
+				else: 
+					newtable += pointstoadd
+
+					
+				newtable.append(newrow)
+
+
+		oldrow = newrow
+
+
+
+	# taking table from list to dataframe
+	newtable=list2df(newtable)
+
+	if return_dataframe == True:
+		return newtable
+	return np.unique(newtable['GEOHASH']).tolist()
+
+# given a line frame iterates through each of the unique geohashs
+# and then decodes the hash into a bounding box corners to view in bl
+def decode_lineframe_geohashs(lineframe,precision):
+	# getting the uniquegeohashs
+	uniquegeohashs = np.unique(lineframe['GEOHASH']).tolist()
+
+	points = [['LAT','LONG']]
+
+	# creating all 4 corner points
+	for row in uniquegeohashs:
+		lat,long = geohash.decode(row)
+		points.append([lat,long])
+
+	points = bl.list2df(points)
+
+	bl.map_table(points,precision,list=True)
+
+	return pd.read_csv('squares8.csv')
+
+
 # returning DataFrame with ever geohashed square and every routeid with each one
 def make_line_frame2(table,precision,position,**kwargs):
 	# where table is dataframe table
@@ -553,5 +762,53 @@ def make_line_frame2(table,precision,position,**kwargs):
 
 	return list2df(newtable)
 
+# returning DataFrame with ever geohashed square and every routeid with each one
+def make_line_frame3(table,precision,position,**kwargs):
+	# where table is dataframe table
+	# where precision is the precision of the geohash
+	# where position is the unique identifier dictioniary integer positon in each row 
+	# return flat dataframe with routeid (unique id.)/geohash values for each list in a database
+	# csv is a bool that returns a csv file or tries to read a csv file if one is available if not it will create and write one
+	csv = False
+	data=table
+	if kwargs is not None:
+		for key,value in kwargs.iteritems():
+			if key == 'csv':
+				if value == True:
+					csv = True
 
+	# doing dataframe logic
+	if isinstance(data,pd.DataFrame):
+		data=df2list(data)
+	header=data[0]
+	columnheader = header[position]
+	newtable = [['GEOHASH',columnheader]]
+
+	count=0
+	count2=0
+	total=0
+
+	if csv == True:
+		try: 
+			newtable = pd.read_csv('line_frame'+str(precision)+'.csv')
+			return newtable
+		except Exception:
+			print 'No line frame csv file found, creating line frame.'
+	for row in data[1:]:
+		count2+=1
+		uniques = extend_geohashed_table3(header,row,precision)
+		temptable = ['GEOHASH']+uniques
+		temptable = pd.DataFrame(temptable[1:], columns=[temptable[0]])
+		temptable[columnheader] = row[position]
+		temptable = df2list(temptable)
+		newtable += temptable[1:]
+		if count2 == 1000:
+			total+=count2
+			count2=0
+			print '[%s/%s]' % (total,len(data))
+
+	if csv == True:
+		writecsv(newtable,'line_frame'+str(precision)+'.csv')
+
+	return list2df(newtable)
 

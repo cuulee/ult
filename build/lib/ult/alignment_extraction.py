@@ -26,7 +26,7 @@ def get_extrema(dataframe):
 	ymin = data['LAT'].min()
 	ymax = data['LAT'].max()
 
-	return [xmin,xmax,ymin,ymax]
+	return {'w':xmin,'e':xmax,'s':ymin,'n':ymax}
 	
 # getting lat and long for each point
 def getlatlong(header,row):
@@ -73,12 +73,15 @@ def get_ytraverse(ymin,ymax,delta):
 	current = ymin
 	while ymax>current:
 		current += delta
+		if current > ymax:
+			current = ymax
 		ytraverse.append(current)
 	return ytraverse
 
 # expands out the values in the ytraverse to an actual linear lien
 def expand_ytraverse(ytraverse,xmin,xmax):
 	newlist =[]
+	print ytraverse
 	for row in ytraverse:
 		point1 = [xmin,row]
 		point2 = [xmax,row]
@@ -111,40 +114,152 @@ def get_points_horizontal(horizontal_line,data):
 
 	point = temp[temp.LONG == minimum]
 	point = df2list(point)
-	print point
+
 	point1 = getlatlong(point[0],point[1])
 	point2 = get_closest_point(point1,data)
-
-	data = list2df(data)
+	#data = bl.list2df(data)
 	data['LONG'] = data['LONG'].round(9)
 	data['LAT'] = data['LAT'].round(9)
 
-	point2 = df2list(point2)
-	print point2[1]
+	point2 = [['LONG','LAT'],point2]
 	point2 = getlatlong(point2[0],point2[1])
+
+
 
 	return point2
 
 
 def get_points_ytraverse(horizontal_lines,data):
+	print horizontal_lines
 	for row in horizontal_lines:
 		point = get_points_horizontal(row,data)
 		print point
 
-data=pd.read_csv('lidar_csv.csv')
 
-delta = 10**-5
+# point is a x,y list of a point
+# dim is either string lat or long 
+# sign is stirng of plus or minus
+# data is the intial points df
+# value of dimmension you wish to compare against
+def get_closest_dim(datum,dim,sign,data):
+	if dim == 'LAT':
+		data['DELTA'] = data['LAT'] - datum
+		if sign == 'plus':
+			data = data[data['DELTA'] > 0]
+		elif sign == 'minus':
+			data = data[data['DELTA'] < 0]  
+	elif dim == 'LONG':
+		data['DELTA'] = data['LAT'] - datum
+		if sign == 'plus':
+			data = data[data['DELTA'] > 0]
+		elif sign == 'minus':
+			data = data[data['DELTA'] < 0]  
+	data['DELTA'] = data['DELTA'].abs()
+	data = data.sort(['DELTA'],ascending=[0])
+	data = data[:1]
+	data = df2list(data)
+
+	point = getlatlong(data)
+
+# given a dataframe returns a polygon alignment in dataframe form
+def make_polygon_bypoints(data,delta):
+
+	for row in data.columns.values.tolist():
+		if 'lat' in str(row).lower():
+			latheader = row
+		if 'lon' in str(row).lower():
+			longheader = row
+	data['LAT'] = data[latheader]
+	data['LONG'] = data[longheader]
+	count = 0
+	polygon = []
+	yvalues = [0]
+	max_yrow = data[data['LAT']==data['LAT'].max()]
+	max_yrow = df2list(max_yrow)
+	min_yrow = data[data['LAT']==data['LAT'].min()]
+	min_yrow = df2list(min_yrow)
+	min_yrow = getlatlong(min_yrow[0],min_yrow[1])
+	max_yrow = getlatlong(max_yrow[0],max_yrow[1])
+
+
+	extremalist = [['LONG','LAT'],min_yrow,max_yrow]
+	extrema = get_extrema(data)
+	yvalues = get_ytraverse(extrema['s'],extrema['n'],delta)
+	count2 = 0
+	leftside = [['LONG','LAT']]
+	rightside = [['LONG','LAT']]
+	ind = 0
+	for row in yvalues:
+		if count2 == 0 or ind == 1:
+			count2 = 1
+		else:
+			print row,oldrow
+			potentialvalues = data[(data['LAT'] < row)&(data['LAT'] > oldrow)]
+			max_xrow = potentialvalues[potentialvalues['LONG']==potentialvalues['LONG'].max()]
+			max_xrow = df2list(max_xrow)
+			min_xrow = potentialvalues[potentialvalues['LONG']==potentialvalues['LONG'].min()]
+			min_xrow = df2list(min_xrow)
+			if not len(min_xrow) == 1:
+				leftside.append(getlatlong(min_xrow[0],min_xrow[1]))
+			if not len(max_xrow) == 1:
+				rightside.append(getlatlong(max_xrow[0],max_xrow[1]))
+
+		oldrow = row
+
+
+		polygon = [['LONG','LAT'],min_yrow]
+		for row in leftside[1:]:
+			polygon.append(row)
+		polygon.append(max_yrow)
+		for row in reversed(rightside[1:]):
+			polygon.append(row)
+		polygon.append(min_yrow)
+		print len(polygon)
+	count += 1
+	return polygon
+
+'''
+max_yrow = data[data['LAT']==data['LAT'].max()]
+max_yrow = df2list(max_yrow)
+min_yrow = data[data['LAT']==data['LAT'].min()]
+min_yrow = df2list(min_yrow)
+min_yrow = getlatlong(min_yrow[0],min_yrow[1])
+max_yrow = getlatlong(max_yrow[0],max_yrow[1])
+
+
+extremalist = [['LONG','LAT'],min_yrow,max_yrow]
+print extremalist
 extrema = get_extrema(data)
-xmin = extrema[0]
-xmax = extrema[1]
-ymin = extrema[2]
-ymax = extrema[3]
+delta = .0001
+yvalues = get_ytraverse(extrema['s'],extrema['n'],delta)
+count = 0
+leftside = [['LONG','LAT']]
+rightside = [['LONG','LAT']]
+for row in yvalues:
+	if count == 0:
+		count = 1
+	else:
+		print row,oldrow
+		potentialvalues = data[(data['LAT'] < row)&(data['LAT'] > oldrow)]
+		max_xrow = potentialvalues[potentialvalues['LONG']==potentialvalues['LONG'].max()]
+		max_xrow = df2list(max_xrow)
+		rightside.append(getlatlong(max_xrow[0],max_xrow[1]))
+		min_xrow = potentialvalues[potentialvalues['LONG']==potentialvalues['LONG'].min()]
+		min_xrow = df2list(min_xrow)
+		leftside.append(getlatlong(min_xrow[0],min_xrow[1]))
+	oldrow = row
+polygon = [['LONG','LAT'],min_yrow]
+for row in leftside[1:]:
+	polygon.append(row)
+polygon.append(max_yrow)
+for row in reversed(rightside[1:]):
+	polygon.append(row)
+polygon.append(min_yrow)
+'''
+#bl.make_points(rightside,list=True,filename='rightside.geojson')
+#bl.make_points(leftside,list=True,filename='leftside.geojson')
+#bl.make_points(extremalist,list=True,filename='extrema.geojson')
+bl.make_polygon(polygon,list=True,filename='polygon.geojson')
+filedict = {'extrema.geojson':'red'}
 
-
-ytraverse = get_ytraverse(ymin,ymax,delta)
-print ytraverse
-horizontal_lines = expand_ytraverse(ytraverse,xmin,xmax)
-print horizontal_lines
-get_points_ytraverse(horizontal_lines,data)
-
-
+bl.loadparsehtml(bl.collect(),True,file_dictionary=filedict)
