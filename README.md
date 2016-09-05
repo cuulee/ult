@@ -15,8 +15,8 @@ The nice thing about whats these indexs are made is, extracting the features fro
 The index also contains every single area given instead of what would be a point comparison against 50 diffent geometries in a typical geometric comparison. 
 Benchmarks in comparison against shapely:
 ```
-SHAPELY    0.027808
-ULT        0.001157
+SHAPELY | 0.027808
+ULT | 0.001157
 dtype: float64
 24.0287388881x 100 points
 SHAPELY    2.367857
@@ -28,4 +28,4 @@ ULT         0.095100
 dtype: float64
 256.996006301x 100000 points
 ```
-** Its also worth noting that this is a one polygon comparison ult can have as many polygons within its index as it needs and see little hit in performence, while I'm not sure how you would do with out a hard for loop through every geometry in shapely **
+**Its also worth noting that this is a one polygon comparison ult can have as many polygons within its index as it needs and see little hit in performence, while I'm not sure how you would do with out a hard for loop through every geometry in shapely**
