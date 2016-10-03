@@ -4,7 +4,7 @@ import numpy as np
 import geohash
 import json
 import itertools
-
+import time
 
 # gets the extrema dictionary of the alignment df
 def get_extrema(df):
@@ -128,25 +128,34 @@ def get_intersect_table(data):
 # given a latout compares agaisnt global itable
 # returns true or false based on that
 def map_column(lat):
+	if not icomparison == False:
+		minlat,maxlat = icomparison
+		if minlat < lat and maxlat > lat:
+			return True
+		else:
+			return False
 	size = len(itable[itable['LATOUT'] > lat])
 	# gettin innerbool
 	if size / 2 == float(size) / 2.0 or size == 0:
-		innerbool = False
+		return False
 	else:
-		innerbool = True	
-	return innerbool
+		return True	
 
 # takes each point found and tests it against the vertical line test
 def vert_line_test(data):
 	global itable
+	global icomparison
 	count = 0
 	total = 0
 	newlist = []
-	for dfcolumn,itabletemp in data:
+	for dfcolumn,itabletemp,comparison in data:
 		itable = itabletemp
-		
-		dfcolumn['BOOL2'] = dfcolumn['LAT'].map(map_column)
-		dfcolumn = dfcolumn[dfcolumn['BOOL2'] == True]
+		icomparison = comparison
+		if len(itable) == 0:
+			dfcolumn['BOOL2'] = False
+		else:
+			dfcolumn['BOOL2'] = dfcolumn['LAT'].map(map_column)
+			dfcolumn = dfcolumn[dfcolumn['BOOL2'] == True]
 		
 		newlist += dfcolumn['GEOHASH'].values.tolist()
 		if count == 10:
@@ -200,15 +209,54 @@ def vert_line_test_exhaustive(data,itable,innerbool):
 			if count == 1000:
 				total += count
 				print 'Progress: [%s/%s]' % (total,len(data))
+
 				count = 0
 
 	return pd.DataFrame(newlist[1:],columns=newlist[0])
+
+# solving alignment for 
+# the best method of solving all equations
+def solve_alignment(longs,coords):
+	count = 0
+	newlist = []
+	dictthing = {}
+	if not coords[0] == coords[-1]:
+		coords = coords + [coords[0]]
+	for long,lat in coords:
+		if count == 0:
+			count = 1
+		else:
+			current = 0
+			ind = 0
+			for row in longs:
+				ind = 0
+				if row < long and row > oldlong:
+					ind = 1
+				elif row < oldlong and row > long:
+					ind = 1
+				if ind == 1:
+					if oldlong == long:
+						slope == 100000000
+					else:
+						slope = (lat - oldlat) / (long - oldlong)
+					lat = ((row - oldlong) * slope) + oldlat
+					try:
+						dictthing[str(current)].append(lat)
+					except:
+						dictthing[str(current)] = [lat]
+				#solves['LAT'] = ((solves['LONG'] - oldlong) * slope) + oldlat
+				#solves['X'] = solves.index + 1
+				current = current + 1
+
+		oldlong = long
+		oldlat = lat
+	return dictthing
 
 
 # gets each df associated with a specific x
 # as well as the solved itabledf for each x
 # returns a list of rows with [columndf,itablesolved]
-def prepare_columns(data,itable):
+def prepare_columns(data,solves):
 	count = 0
 	for row in data.columns.values.tolist():
 		if 'lat' in str(row).lower():
@@ -216,25 +264,57 @@ def prepare_columns(data,itable):
 		elif 'long' in str(row).lower():
 			longpos = count
 		count += 1
-
-	# getting x, and y values
-	xy = data[0].str.split(',',expand=True)
-	data[['X','Y']] = xy.astype(int)
-
+	count3 = 0
 	newlist = []
-	for row in data['X'].unique():
+	total = 0
+	xsize = len(np.unique(data['X']))
+	for name,temp in data.groupby('X'):
+		comparison = False
+
 		# getting temporary df that will be used for this column
-		temp = data[data['X'] == row]
+		#temp = data[data['X'] == row]
 		
 		# getting long value
-		long = temp['LONG'].unique()[0]
-
+		'''
 		# getting lat outs on the itable
 		itabletemp = itable
 		itabletemp['LATOUT'] = ((long - itable['LONG1']) * itable['SLOPE']) + itable['LAT1']
 		itabletemp = itabletemp[(((itabletemp['LONG1'] > long)&(itabletemp['LONG2'] < long))|((itabletemp['LONG1'] < long)&(itabletemp['LONG2'] > long)))]
 		
-		newlist.append([temp,itabletemp])
+		'''
+		# logic for if the itable len is 2
+		# if this logic is correct hopefully we can just use a 
+		#comparison rather a dfslice
+		try:
+			rawlats = solves[str(name)]
+		except:
+			rawlats = [0]
+		bins = []
+		count = 0
+		rawlats = sorted(np.unique(rawlats).tolist())
+		count2 = 0
+		for row in rawlats[1:]:
+			if count == 0:
+				bins.append('in' + str(count2))
+				count = 1
+			elif count == 1:
+				bins.append('out' + str(count2))
+				count = 0
+			count2 += 1
+
+		if rawlats == []:
+			rawlats = [0]
+		temp['LABEL'] = pd.cut(temp['LAT'],bins=rawlats,labels=bins)
+		temp = temp[temp['LABEL'].str[:2] == 'in']
+		newlist += np.unique(temp['GEOHASH']).tolist()
+
+		if count3 == 25:
+			total += 25
+			count3 = 0
+			print '[%s / %s]' % (total,xsize)
+		count3 += 1
+
+
 	return newlist
 
 
@@ -251,15 +331,38 @@ def expand_geohashs(data2):
 	data2['STRING'] = data3
 	data3 = data3.str.split(',',expand=True)
 	data2[['LAT','LONG']] = data3.astype(float)
+
 	return data2
+# expands out geohash table
+def add_latlngs(data):
+	newlist = []
+	lats =[]
+	longs = []
+	for row in data['GEOHASH']:
+		lat,long = geohash.decode(row)
+		longs.append(long)
+		lats.append(lat)
+	data['LAT'] = lats
+	data['LONG'] = longs
+	'''
+	#data2 = data2.unstack(level=0).reset_index()
+	data3 = data2['GEOHASH'].map(map_points)
+	#print data3,len(data3),len(data2)
+	data2['STRING'] = data3
+	data3 = data3.str.split(',',expand=True)
+	data2[['LAT','LONG']] = data3.astype(float)
+	'''
+
+	return data
+
+
 
 # traverse columns rows for each unique value set in forward and reverse
 def traverse_columns_rows(indexdf,indexlist,innerdf,alignmentdf):
 	global totallist
 	global innerhashdf
-	innerhashdf = innerdf
 	totallist = []
-
+	
 	# doing the column value iteration first
 	cols = indexdf.columns.values.tolist()
 	
@@ -301,29 +404,30 @@ def traverse_columns_rows(indexdf,indexlist,innerdf,alignmentdf):
 
 		totallist += newrow
 
+
 	# getting all the uniques in the totallist 
 	totallist = np.unique(totallist).tolist()
 
+
 	# getting first querry of bools to then check if within polygon 
 	# via vertical line intersection test
+
 	newdf = indexdf.unstack(level=0).reset_index()
 	newdf['GEOHASH'] = innerdf.unstack(level=0).reset_index()[0]
 	newdf['BOOL'] = newdf[0].isin(totallist)
 	innergeohashs = newdf[newdf['BOOL'] == False]
+	innergeohashs['X'] = innergeohashs['level_0']
+	data = expand_geohashs(innergeohashs)
 
 	# vertical line intersection test
-	itable = get_intersect_table(alignmentdf)
-	#itable.to_csv('itable.csv',index=False)
-	innergeohashs = expand_geohashs(innergeohashs)
-	#innergeohashs.to_csv('innerhashs.csv',index=False)
 	
+	solves = solve_alignment(np.unique(data['LONG']).tolist(),alignmentdf[['LONG','LAT']].values.tolist())
+	#itable.to_csv('itable.csv',index=False)
+	#innergeohashs.to_csv('innerhashs.csv',index=False)
 	# preparing columns for vert_line_test
-	data = prepare_columns(innergeohashs,itable)
-
+	data = prepare_columns(data,solves)
 	# getting innergeohashs
-	innergeohashs = vert_line_test(data)
-	innergeohashs = pd.DataFrame(innergeohashs,columns=['GEOHASH'])
-
+	innergeohashs = pd.DataFrame(data,columns=['GEOHASH'])
 	return innergeohashs
 
 def get_indexlist(filleddf,innerhashtable):
@@ -347,11 +451,17 @@ def get_innerhashs_outsided(alignmentdf,maxsize,**kwargs):
 	# filling all the values in the alignment string list
 	indexlist = [0]
 	size = 3
-	while len(indexlist) < 300 and maxsize == False:
+	alignsize = 0
+	while alignsize < 300 and maxsize == False:
 		size += 1
-		innerhashtable = get_inner_hashtable(alignmentdf,size)
+		#innerhashtable = get_inner_hashtable(alignmentdf,size)
 		filleddf = fill_geohashs(alignmentdf,size)
-		indexlist = get_indexlist(filleddf,innerhashtable)
+		alignsize = len(np.unique(filleddf['GEOHASH']))
+		#indexlist = get_indexlist(filleddf,innerhashtable)
+	#innerhashtable = get_inner_hashtable(alignmentdf,size)
+	
+	innerhashtable = get_inner_hashtable(alignmentdf,size)
+	indexlist = get_indexlist(filleddf,innerhashtable)
 
 	# getting index list if maxsize is already givven
 	if not maxsize == False:
@@ -369,11 +479,14 @@ def get_innerhashs_outsided(alignmentdf,maxsize,**kwargs):
 		next_level = check_third_dim(totalhashs,alignmentdf,innerbool)
 	else:
 		next_level = []	
+
 	# getting indiceis table
 	indexdf = bl.make_indicies(innerhashtable.shape[1],innerhashtable.shape[0])
 
 	# stringifying indexlist
 	strindexlist = stringify_indicies(indexlist)
+
+	#df = add_latlngs(df)
 
 	return traverse_columns_rows(indexdf,strindexlist,innerhashtable,alignmentdf),next_level
 
@@ -743,7 +856,7 @@ def get_innerring_tables(inner_rings,maxsize,**kwargs):
 
 	# logic to account for if no inner rings are given
 	if len(inner_rings) == 0:
-		return []
+		return [],[]
 
 	# iterating through each ring
 	newlist = []
@@ -845,13 +958,11 @@ def make_single_ring(outer_ring,inner_rings,**kwargs):
 
 	# getting outer geohashs that will encompass ring
 	geohashsouter,nextlevel1 = get_innerhashs_small(outer_ring,False,next_level=next_level)
-	print nextlevel1,'nextlevel1'
 	# getting maxsize of geohashs from the df just made
 	maxsize = geohashsouter['GEOHASH'].str.len().max()
 
 	# getting the list of geohash holes
 	geohashholes,nextlevel2 = get_innerring_tables(inner_rings,maxsize,next_level=next_level)
-	print nextlevel2,'2'
 	# logic for handling if no holes were given
 	if len(geohashholes) == 0:
 		totalgeohashs = geohashsouter
@@ -898,7 +1009,6 @@ def make_ring_index(data):
 		count += 1
 	totals = pd.concat(totals)
 	return totals
-
 '''
 data = pd.read_csv('a.csv')
 bl.clean_current()

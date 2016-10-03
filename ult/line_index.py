@@ -4,9 +4,26 @@ import itertools
 import berrl as bl
 import geohash
 import time
+import json
 
 # gets the extrema dictionary of the alignment df
 def get_extrema(df):
+	if isinstance(df,list):
+		w = 1000
+		e = -1000
+		n = -1000
+		s = 1000
+		for long,lat,valid in df:
+			if long < w:
+				w = long
+			if long > e:
+				e = long
+			if lat > n:
+				n = lat
+			if lat < s:
+				s = lat
+		return {'n':n,'s':s,'e':e,'w':w}
+
 	# getting lat and long columns
 	for row in df.columns.values.tolist():
 		if 'lat' in str(row).lower():
@@ -25,7 +42,7 @@ def get_extrema(df):
 
 
 # returns a set of points that traverse the linear line between two points
-def generate_points(number_of_points,point1,point2):
+def generate_points(number_of_points,point1,point2,areaindex):
 	# getting x points
 	x1,x2 = point1[0],point2[0]
 	xdelta = (float(x2) - float(x1)) / float(number_of_points)
@@ -43,7 +60,7 @@ def generate_points(number_of_points,point1,point2):
 		count += 1
 		xcurrent += xdelta
 		ycurrent += ydelta
-		newlist.append([xcurrent,ycurrent])
+		newlist.append([xcurrent,ycurrent,areaindex])
 
 	return newlist
 
@@ -112,10 +129,18 @@ def extend_geohashed_table(header,extendrow,precision):
 
 	return geohashs,newtable
 
+def get_cords_json(coords):
+	data = '{"a":%s}' % coords.decode('utf-8') 
+	data = json.loads(data)	
+	return data['a']
 
-# for a given line alignment gets the segment split parameters
+
+
 # hopefully a function can be made to properly make into lines
-def get_seg_splits(data):
+def fill_geohashs(data,size):
+	# function for linting whether the first point and lastpoint are the same if not appends talbe
+
+	
 	extrema = get_extrema(data)
 
 	# getting upper lefft and lowerright point
@@ -125,8 +150,50 @@ def get_seg_splits(data):
 
 	# getting geohash for ul and lr
 	# assuming 8 for the time being as abs min
-	ulhash = geohash.encode(ul[1],ul[0],8)
-	lrhash = geohash.encode(lr[1],lr[0],8)
+	ulhash = geohash.encode(ul[1],ul[0],size)
+	lrhash = geohash.encode(lr[1],lr[0],size)
+
+	lat,long,latdelta,longdelta = geohash.decode_exactly(ulhash)
+
+	latdelta,longdelta = latdelta * 2.0,longdelta * 2.0
+
+	hashsize = ((latdelta ** 2) + (longdelta ** 2)) ** .5
+
+	count = 0
+
+	count = 0
+	newlist = []
+	for row in data:
+		if count == 0:
+			count = 1
+		else:
+			dist = distance(oldrow[:-1],row[:-1])
+			if dist > hashsize / 10.0:
+				number = (dist / hashsize) * 10.0
+				number = int(number)
+				newlist += generate_points(number,oldrow[:-1],row[:-1],row[2])[1:]
+			else:
+				newlist.append(row)
+		oldrow = row
+
+
+	return newlist
+
+# for a given line alignment gets the segment split parameters
+# hopefully a function can be made to properly make into lines
+def get_seg_splits(data):
+	data = bl.map_table(data,9,map_only=True)
+	extrema = get_extrema(data)
+
+	# getting upper lefft and lowerright point
+	ul = [extrema['w'],extrema['n']]
+	lr = [extrema['e'],extrema['s']]
+
+
+	# getting geohash for ul and lr
+	# assuming 8 for the time being as abs min
+	ulhash = geohash.encode(ul[1],ul[0],9)
+	lrhash = geohash.encode(lr[1],lr[0],9)
 
 	lat,long,latdelta,longdelta = geohash.decode_exactly(ulhash)
 
@@ -159,19 +226,28 @@ def get_seg_splits(data):
 		oldrow = row
 
 	newlist = pd.DataFrame(newlist,columns=['LONG','LAT'])
-	newlist = bl.map_table(newlist,8,map_only=True)
+	newlist = bl.map_table(newlist,9,map_only=True)
 	return newlist
 
 # making line segment index
-def make_line_index(data,headercolumn,**kwargs):
+def make_line_index(data,**kwargs):
 	csv = False
+	uniqueid = False
 	filename = False
+	return_index = False
 	for key,value in kwargs.iteritems():
 		if key == 'csv':
 			csv = value
 		if key == 'filename':
 			filename = value
-
+		if key == 'uniqueid':
+			uniqueid = value
+		if key == 'return_index':
+			return_index = value
+	if uniqueid == False:
+		uniqueidheader = 'gid'
+	else:
+		uniqueidheader = uniqueid
 	if filename == False:
 		filename = 'line_index.csv'
 
@@ -182,22 +258,31 @@ def make_line_index(data,headercolumn,**kwargs):
 	totalids = []
  	count = 0
  	total = 0
- 	
  	# getting unique column position
  	for row in header:
- 		if headercolumn in str(row):
- 			position = count
+ 		#if headercolumn in str(row):
+ 		#	position = count
+ 		row = row.encode('utf-8')
+ 		if uniqueidheader in str(row):
+ 			uniqueidrow = count
  		count += 1
 
  	count = 0
- 	for row in data.values.tolist():
-		geohashs,newdata = extend_geohashed_table(header,row,8)
-		newdata = get_seg_splits(newdata)	
-		geohashs = np.unique(newdata['GEOHASH']).tolist()
-		tempids = [str(row[position])] * len(geohashs)
-		totalgeohashs += geohashs
-		totalids += tempids
+ 	newlist = []
+ 	for coords,row in itertools.izip(data['coords'].map(get_cords_json).values.tolist(),data.values.tolist()):
+		L1 = coords
+		L2 = [[row[uniqueidrow]]] * len(coords)
+		coords = [x + y for x,y in zip(L1,L2)]
+		
+		#newdata = pd.DataFrame(row,columns=['LONG','LAT'])
 
+		newdata = fill_geohashs(coords,8)
+		#newdata = get_seg_splits(newdata)	
+		#geohashs = np.unique(newdata['GEOHASH']).tolist()
+		#tempids = [str(row[position])] * len(geohashs)
+		#totalgeohashs += geohashs
+		#totalids += tempids
+		newlist += newdata
 		# printing progress
 		if count == 1000:
 			total += count
@@ -207,10 +292,13 @@ def make_line_index(data,headercolumn,**kwargs):
 		count += 1
 
 	# creating the dataframe that will be used for the index
-	totaldf = pd.DataFrame(totalgeohashs,columns=['GEOHASH'])
-	totaldf[str(headercolumn)] = totalids
-
-	if csv == True:
+	totaldf = pd.DataFrame(newlist,columns=['LONG','LAT','AREA'])
+	totaldf = bl.map_table(totaldf,8,map_only=True)
+	totaldf = totaldf[['GEOHASH','AREA']].groupby('GEOHASH').first()
+	totaldf = totaldf.reset_index()
+	if return_index == True:
+		return totaldf
+	else:
 		totaldf.to_csv(filename,index=False)
 
 	return totaldf
@@ -260,6 +348,12 @@ def make_multi_dict(data,headerval):
 
 	return collision_dict2
 
+
+'''
+args = bl.make_query_buffer('la_routes')
+data = pd.read_sql_query(*args)
+make_line_index(data)
+'''
 '''
 bl.clean_current()
 data2 = pd.read_csv('la_routes.csv')
