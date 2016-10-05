@@ -235,6 +235,7 @@ def make_line_index(data,**kwargs):
 	uniqueid = False
 	filename = False
 	return_index = False
+	precision = 8
 	for key,value in kwargs.iteritems():
 		if key == 'csv':
 			csv = value
@@ -244,6 +245,8 @@ def make_line_index(data,**kwargs):
 			uniqueid = value
 		if key == 'return_index':
 			return_index = value
+		if key == 'precision':
+			precision = value
 	if uniqueid == False:
 		uniqueidheader = 'gid'
 	else:
@@ -300,6 +303,7 @@ def make_line_index(data,**kwargs):
 		return totaldf
 	else:
 		totaldf.to_csv(filename,index=False)
+		return totaldf
 
 	return totaldf
 

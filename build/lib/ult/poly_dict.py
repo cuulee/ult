@@ -563,7 +563,7 @@ def find_root_index(thash,indexdict,minsize,areadict):
 			else:
 				current = current.get(thash[size-1],'')
 			size += 1
-		return areadict[current]
+		return areadict.get(current,'')
 	except IndexError:
 		return ''
 
@@ -582,14 +582,27 @@ def find_no_area_index(thash,indexdict,minsize):
 	except IndexError:
 		return ''
 
+# checks to see if the value going into area index
+# has a geohash if not returns a df with a gehahs column
+def check_geohash(data):
+	for row in data.columns.values.tolist():
+		if row == 'GEOHASH':
+			return data
+	data = bl.map_table(data,12,map_only=True)
+	return data
 
 # maps the index dictonary against an area index
 def area_index(data,indexdict):
+	# checking to see if a geoahash column exists if not adds one
+	data = check_geohash(data)
+
 	ind = False
 	try:
 		areadict = indexdict['areas']
 	except KeyError: 
 		ind = True
+	
+
 	min = indexdict['min'] 
 	areas = []
 	ghashs = data['GEOHASH'].values.tolist()
