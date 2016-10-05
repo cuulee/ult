@@ -4,8 +4,6 @@ Polygon Index / Linstring Index for spatial aggregations
 
 Geospatial problems are hard, especially when having to relatee a set of geometries (lines or polygons) to a substantial set of points, traditional methodologies essentially are infeasible over 100k + points without huge computing time lost. The solution is pretty simple remove geometry entirely from the operation. Like many things in CS this trades precomputation time of the indexs with the performence boost of using said indicies. 
 
-So something to keep in mind is typical geometric comparisions aren't really fair when comparing it to indexing a dictionary a few times at the maximum. This algorithm takes an area or set of area (which can be complex) and creates a multi-dimmensional dictionary of different levels. For each area in an index in contains a 2-hash or 3-hash level precision meaning it carries to levels of geohashs within the dictionary. To decide which size is optimal rough approximations are done to hopefully get a dense enough area covered by the geohash so that the error is considerabily negligable, +/- 3 % of the area max but usually under 1 %. If you wish to trade computation for tailing area coverage its very easy to do so, and get as much accuracy as you want. (for polygons at least)
-
 ![](https://cloud.githubusercontent.com/assets/10904982/18169911/3bf81a7a-702a-11e6-846d-45b3841b48ca.png)
 
 The nice thing about whats these indexs are made is, extracting the features from them on say a dataframe of points is incredibly easy:
@@ -29,3 +27,10 @@ dtype: float64
 256.996006301x 100000 points
 ```
 **Its also worth noting that this is a one polygon comparison ult can have as many polygons within its index as it needs and see little hit in performence, while I'm not sure how you would do with out a hard for loop through every geometry in shapely**
+
+### How it works / How to Use
+#### Polygons 
+For polygons ult is pretty strict on how it accepts tables to be made into indexs entirely you can look at a csv I added as example, but generally speaking I usually use another repository I wrote called KML which interpets all the polygons for me and outputs into a table that be directly used by ult. When ult creates an index from a table its essentially compiling a multi dimmensional dictionary object that will be output as a json. To use this json simply read it into memory and send into the function area_index. 
+
+
+
