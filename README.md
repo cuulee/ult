@@ -36,7 +36,7 @@ Building an index isn't necessarily cheap or quick computationally speaking. Bui
 
 For huge indexs you may want to utilize multi processesing in order to create the csv files used to create an index faster, I've added this functionality as well using the sc=sc kwarg in which you pass in a spark context and splits the remaining areas up into 8 supprocesses. 
 
-While the indexs created aren't tiny by any means there also not huge, I've attempted to be as conservative as possible in making the indexs as small as possible and it works pretty well, a [states_index.json](link here) is about 1.2 mb which isn't terrible and probably smaller than the amount of memory for every alignment in a list. 
+While the indexs created aren't tiny by any means there also not huge, I've attempted to be as conservative as possible in making the indexs as small as possible and it works pretty well, a [states_index.json](https://raw.githubusercontent.com/murphy214/ult/master/states_index.json) is about 1.2 mb which isn't terrible and probably smaller than the amount of memory for every alignment in a list. 
 
 Below is a small sample of the code to build and code to use these indexs:
 #### Building 
