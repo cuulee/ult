@@ -4,7 +4,12 @@ Polygon Index / Linstring Index for spatial aggregations
 
 Geospatial problems are hard, especially when having to relatee a set of geometries (lines or polygons) to a substantial set of points, traditional methodologies essentially are infeasible over 100k + points without huge computing time lost. The solution is pretty simple remove geometry entirely from the operation. Like many things in CS this trades precomputation time of the indexs with the performence boost of using said indicies. 
 
-![](https://cloud.githubusercontent.com/assets/10904982/18169911/3bf81a7a-702a-11e6-846d-45b3841b48ca.png)
+
+##### Pictures
+![](https://cloud.githubusercontent.com/assets/10904982/19921148/0080300e-a0b3-11e6-9395-add3308f2238.png)
+![](https://cloud.githubusercontent.com/assets/10904982/19921150/0395f56c-a0b3-11e6-93fe-00166d12e08f.png)
+![](https://cloud.githubusercontent.com/assets/10904982/19921175/19c1e990-a0b3-11e6-8284-3563b183ac17.png)
+
 
 The nice thing about whats these indexs are made is, extracting the features from them on say a dataframe of points is incredibly easy:
 * geohash the entire table 
@@ -88,7 +93,3 @@ data = bl.unique_groupby(data,'AREA')
 nl.make_points(data,'points.geojson',mask=True)
 vt.a()
 ```
-##### Pictures
-![](https://cloud.githubusercontent.com/assets/10904982/19921148/0080300e-a0b3-11e6-9395-add3308f2238.png)
-![](https://cloud.githubusercontent.com/assets/10904982/19921150/0395f56c-a0b3-11e6-93fe-00166d12e08f.png)
-![](https://cloud.githubusercontent.com/assets/10904982/19921175/19c1e990-a0b3-11e6-8284-3563b183ac17.png)
