@@ -88,6 +88,7 @@ data = bl.unique_groupby(data,'AREA')
 nl.make_points(data,'points.geojson',mask=True)
 vt.a()
 ```
-##### Output of Visualization Below
-![](https://cloud.githubusercontent.com/assets/10904982/19135015/a4242cc2-8b2f-11e6-89f4-bdbf5206f7c3.png)
-
+##### Pictures
+[]!(https://cloud.githubusercontent.com/assets/10904982/19921148/0080300e-a0b3-11e6-9395-add3308f2238.png)
+[]!(https://cloud.githubusercontent.com/assets/10904982/19921150/0395f56c-a0b3-11e6-93fe-00166d12e08f.png)
+[]!(https://cloud.githubusercontent.com/assets/10904982/19921175/19c1e990-a0b3-11e6-8284-3563b183ac17.png)
