@@ -1,668 +1,332 @@
-import berrl as bl 
 import pandas as pd 
 import numpy as np 
-from polygon_ind import *
 import itertools
 import time
 import os
-import json
+import simplejson as json
+from pipegeohash import map_table,random_points_extrema,lint_values
+from polygon_ind import make_ring_index
+import geohash
+import kyoto as kt
+import deepdish as dd
+from nlgeojson import stringify
 
-# makes a flat dictionary structure
-def make_dict(data,areaname,**kwargs):
-	dictionary = {}
-	for key,value in kwargs.iteritems():
-		if key == 'dictionary':
-			dictionary = value
+def split_frame(data,minsize,maxsize):
 
-	# getting max str size
-	maxsize = data['total'].str.len().max()
-	minsize = maxsize - 1
-
-	# getting dataframes of maximum and minimum size
-	mindf = data[data['total'].str.len() == minsize]
-	maxdf = data[data['total'].str.len() == maxsize]
-
-	# making all minimum df structures
-	for row in mindf.values.tolist():
-		dictionary[str(row[0])] = areaname
-
-	# making all maximum df structures
-	# getting all unique 4 character maxdf strings
-	uniquemaxdfs = np.unique(maxdf['total'].str[:-1]).tolist()	
-	for row in uniquemaxdfs:
-		tempdict = {}
-		oldrow = row
-		temp = maxdf[maxdf['total'].str[:-1] == row] 
-		for row in temp.values.tolist():
-			tempdict[str(row[0])] = areaname
-		try:
-			values = dictionary[str(oldrow)]
-			if isinstance(values,dict):
-				values.update(tempdict)
-				dictionary[str(oldrow)] = values
-		
-		except KeyError:
-			dictionary[str(oldrow)] = tempdict
-
-	return dictionary
-
-
-# makes a list of dataframes to a dictionary
-def make_dicts(dataframes):
-	dictionary = {}
-	for row in dataframes:
-		dictionary = make_dict(row[0],str(row[1]),dictionary=dictionary)
-	return dictionary
-
-# the map function for the flat dictionary
-def map_dictionary(thash):
-	global indexdict
-	global maxsize
-	try:
-		current = indexdict[thash[:maxsize - 1]]
-		if not isinstance(current,dict):
-			return current
-		else:
-			return current[thash[:maxsize]]
-	except KeyError:
-		return ''
-
-# given a max size returns a list that can be sent into make dicts
-def read_sizes(maxsize):
-	files = bl.get_filetype('','csv')
 	newlist = []
-	for row in files:
-		if str(maxsize) == row[-5]:
-			areaname = row[:-6]
-			data = pd.read_csv(row[1:])
-			newlist.append([data,areaname[1:]])
-	return newlist
-
-# maps the given area to the dictionary given 
-# assumes all dicts have the same maxsize currently
-def map_area(testdata,dictionary,max):
-	global indexdict
-	global maxsize 
-	maxsize = max
-	indexdict = dictionary
-
-	# mapping the data to an area then selecting only the values that
-	# fell within an area
-	testdata['AREA'] = testdata['GEOHASH'].map(map_dictionary)
-	testdata = testdata[testdata['AREA'].str.len() > 0]
-
-	return testdata
-
-# the map function for the flat dictionary
-def map_dictionary_mult(thash):
-	global indexdict
-	global maxsize
-	global maxsize 
-	global minsize
-	try:
-		size = minsize
-		current = indexdict
-		while isinstance(current,dict):
-			current = current[thash[:size]]
-			size += 1
-		return current
-	except KeyError:
-		return ''
-
-
-# maps the given area to the dictionary given 
-# assumes all dicts have the same maxsize currently
-def map_area_mult(testdata,dictionary,min,max):
-	global indexdict
-	global maxsize 
-	global minsize
-	global dif
-	maxsize = max
-	minsize = min
-	dif = maxsize - minsize
-	indexdict = dictionary
-
-	# mapping the data to an area then selecting only the values that
-	# fell within an area
-	testdata['AREA'] = testdata['GEOHASH'].map(map_dictionary_mult)
-	#testdata = testdata[testdata['AREA'].str.len() > 0]
-
-	return testdata
-
-# given a dataframe containing an alignment returns 
-# the maxsize of the precision
-def get_maxsize(data):
-	indexlist = 0
-	size = 3
-	maxsize = False
-	while indexlist < 250 and maxsize == False:
-		size += 1
-		innerhashtable = get_inner_hashtable(data,size)
-		indexlist = fill_indicies2(data,innerhashtable,size)
-
-	return size
-
-# gets the exact size df it exists and the uniques 
-# for the next level
-def get_size_uniques(data,size):
-	sizeddf = data[data['total'].str.len() == size]
-	uniques = np.unique(data['total'].str[:size]).tolist()
-	
-	#newdf = pd.DataFrame(uniques,columns=['total'])
-	return [sizeddf,uniques]
-
-
-# called within transforms
-# where the last str byte is selected
-def lastkey(somedict):
-	return dict(map(lambda (key, value): (str(key[-1]), value), somedict.items()))
-
-
-# function for transforming an entire level of a dictionary
-def transform(multilevelDict):
-	new = lastkey(multilevelDict)
-
-	for key, value in new.items():
-		if isinstance(value, dict):
-			new[key] = transform(value)
-
-	return new
-
-
-
-# drills a dictionary upwards towards lower level 
-# intial keys
-# number of levels is how many levels are between
-# the new minimum and the previous minimum and need to be created 
-def make_layer_dif(dictionary,numberoflevels):
+	bs = []
+	cs = []
+	generdata = gener(data)
+	ind = 0
 	count = 0
-	while not numberoflevels == count:
-		totaldict = {}
-		df = pd.DataFrame(dictionary.keys(),columns=['GEOHASH'])
-		df['GEOHASH1'] = df['GEOHASH'].str[:-1]
-		df = df.groupby('GEOHASH1')
-		for name,group in df:
-			newdict = {}
-			for row in group['GEOHASH'].values.tolist():
-				newdict[str(row)] = dictionary[str(row)]
-			totaldict[name] = newdict
-			#print group
-		count += 1
-		dictionary = totaldict
-	return dictionary
+	while ind == 0:
+		try:
+			row = next(generdata)
+			count += 1
+			print '[%s/%s] Uniques' % (count,len(data))
+			a,b,c = reduce_to_min(row,minsize=minsize)
+			newlist.append(a)
+			bs.append(b)
+			cs.append(c)
+		except StopIteration:
+			ind = 1
 
-def drill_dictionary(multi,lowestlevel):
-	level = len(multi.keys()[0])
-	multi = make_layer_dif(multi,level - lowestlevel)
-	newdict = {}
-	for firstkey in multi.keys():
-		new = multi[firstkey]
-		#new = lastkey(multi[firstkey])
-		if isinstance(new,dict):
-			new = transform(new)
-		newdict[firstkey] = new 
-	return newdict
+	data = sum(newlist,[])
+	return np.unique(data).tolist(),maxsize,minsize
 
-
-# makes a flat dictionary structure
-def make_dict_range(data,areaname,minimumsize,mintotal,**kwargs):
-	dictionary = {}
-	for key,value in kwargs.iteritems():
-		if key == 'dictionary':
-			dictionary = value
-
-	# getting max str size
+# given a dataframe and minimum size 
+# returns the uniques within the dataframe
+# that exist in between the minsizie and lowest
+# level values
+def reduce_to_min(data,**kwargs):
 	maxsize = data['total'].str.len().max()
-
-	# checking dictionary for larger max size
- 	#minsize = maxsize - 1
-
-	# getting dataframes of maximum and minimum size
-	size = maxsize + 1
-	dflist = []
-	currenttempdict = {}
-	sizes = []
-	dicttotal = dictionary
-	sizeddf,uniques = get_size_uniques(data,minimumsize)
-	if size - minimumsize == 3:
-		for row in uniques:
-			try:
-				values = dicttotal[str(row)]
-				if isinstance(values,dict):
-					values.update(dicttotal)
-					dicttotal[str(row)] = values
-			
-			except KeyError:
-				dicttotal[str(row)] = {}
-		for row in sizeddf['total'].values.tolist():
-			dicttotal[str(row)] = areaname
-
-		sizeddf,uniques = get_size_uniques(data,minimumsize+1)
-
-		for row in uniques:
-			if len(row) == minimumsize + 1:
-				if isinstance(dicttotal[row[:-1]],dict):
-					dicttotal[row[:-1]][row] = {}
-		for row in sizeddf['total'].values.tolist():
-			if isinstance(dicttotal[row[:-1]],dict):
-				dicttotal[row[:-1]][row] = areaname
-		sizeddf,uniques = get_size_uniques(data,minimumsize+2)
-
-		for row in uniques:
-			if len(row) == minimumsize + 2:
-				if isinstance(dicttotal[row[:-2]],dict):
-					#dicttotal[row[:-1]][row] = {}
-					try: 	
-						dicttotal[row[:-2]][row[:-1]][row] = {}
-					except Exception:
-						dicttotal[row[:-2]][row[:-1]] = {}
-
-		for row in sizeddf['total'].values.tolist():
-				if isinstance(dicttotal[row[:-2]],dict):		
-					dicttotal[row[:-2]][row[:-1]][row] = areaname
-		return dicttotal
-
-	elif size - minimumsize == 4:
-		for row in uniques:
-			try:
-				values = dicttotal[str(row)]
-				if isinstance(values,dict):
-					values.update(dicttotal)
-					dicttotal[str(row)] = values
-			
-			except KeyError:
-				dicttotal[str(row)] = {}
-		for row in sizeddf['total'].values.tolist():
-			dicttotal[str(row)] = areaname
-
-		sizeddf,uniques = get_size_uniques(data,minimumsize+1)
-
-		for row in uniques:
-			if len(row) == minimumsize + 1:
-				if isinstance(dicttotal[row[:-1]],dict):
-					dicttotal[row[:-1]][row] = {}
-		for row in sizeddf['total'].values.tolist():
-				if isinstance(dicttotal[row[:-1]],dict):
-					dicttotal[row[:-1]][row] = areaname
-		sizeddf,uniques = get_size_uniques(data,minimumsize+2)
-
-		for row in uniques:
-			if len(row) == minimumsize + 2:
-				if isinstance(dicttotal[row[:-2]],dict):
-					#dicttotal[row[:-1]][row] = {}
-					try:
-						dicttotal[row[:-2]][row[:-1]][row] = {}
-					except Exception:
-						dicttotal[row[:-2]][row[:-1]] = {}
-
-		for row in sizeddf['total'].values.tolist():
-				if isinstance(dicttotal[row[:-2]],dict):		
-					dicttotal[row[:-2]][row[:-1]][row] = areaname
-
-		sizeddf,uniques = get_size_uniques(data,minimumsize+3)
-
-		for row in uniques:
-			if len(row) == minimumsize + 3:
-				if isinstance(dicttotal[row[:-3]],dict):
-					#dicttotal[row[:-1]][row] = {}
-					try:
-						dicttotal[row[:-3]][row[:-2]][row[:-1]][row] = {}
-					except Exception:
-						dicttotal[row[:-3]][row[:-2]][row[:-1]] = {}
-		
-		for row in sizeddf['total'].values.tolist():
-				if isinstance(dicttotal[row[:-3]],dict):		
-					dicttotal[row[:-3]][row[:-2]][row[:-1]][row] = areaname
-
-		return dicttotal
-	elif size - minimumsize == 5:
-		for row in uniques:
-			try:
-				values = dicttotal[str(row)]
-				if isinstance(values,dict):
-					values.update(dicttotal)
-					dicttotal[str(row)] = values
-			
-			except KeyError:
-				dicttotal[str(row)] = {}
-		for row in sizeddf['total'].values.tolist():
-			dicttotal[str(row)] = areaname
-
-		sizeddf,uniques = get_size_uniques(data,minimumsize+1)
-
-		for row in uniques:
-			if len(row) == minimumsize + 1:
-				if isinstance(dicttotal[row[:-1]],dict):
-					dicttotal[row[:-1]][row] = {}
-		for row in sizeddf['total'].values.tolist():
-			if isinstance(dicttotal[row[:-1]],dict):
-				dicttotal[row[:-1]][row] = areaname
-		sizeddf,uniques = get_size_uniques(data,minimumsize+2)
-
-		for row in uniques:
-			if len(row) == minimumsize + 2:
-				if isinstance(dicttotal[row[:-2]],dict):
-					#dicttotal[row[:-1]][row] = {}
-					#print isinstance(dicttotal[row[:-2]][row[:-1]],dict)
-					try:
-						dicttotal[row[:-2]][row[:-1]][row] = {}
-					except TypeError:
-						dicttotal[row[:-2]][row[:-1]] = {}
-		for row in sizeddf['total'].values.tolist():
-				if isinstance(dicttotal[row[:-2]],dict):		
-					try:
-						dicttotal[row[:-2]][row[:-1]][row] = areaname
-					except TypeError:
-						dicttotal[row[:-2]][row[:-1]] = areaname
-
-		sizeddf,uniques = get_size_uniques(data,minimumsize+3)
-
-		for row in uniques:
-			if len(row) == minimumsize + 3:
-				if isinstance(dicttotal[row[:-3]],dict):
-					#dicttotal[row[:-1]][row] = {}
-					try:
-						dicttotal[row[:-3]][row[:-2]][row[:-1]][row] = {}
-					except Exception:
-						dicttotal[row[:-3]][row[:-2]][row[:-1]] = {}
-
-		for row in sizeddf['total'].values.tolist():
-				if isinstance(dicttotal[row[:-3]],dict):		
-					dicttotal[row[:-3]][row[:-2]][row[:-1]][row] = areaname
-
-		sizeddf,uniques = get_size_uniques(data,minimumsize+4)
-
-		for row in uniques:
-			if len(row) == minimumsize + 4:
-				if isinstance(dicttotal[row[:-4]],dict):
-					#dicttotal[row[:-1]][row] = {}
-					try:
-						dicttotal[row[:-4]][row[:-3]][row[:-2]][row[:-1]][row] = {}
-					except:
-						dicttotal[row[:-4]][row[:-3]][row[:-2]][row[:-1]] = {}
-
-		for row in sizeddf['total'].values.tolist():
-				if isinstance(dicttotal[row[:-4]],dict):		
-					dicttotal[row[:-4]][row[:-3]][row[:-2]][row[:-1]][row] = areaname
-
-		return dicttotal
-	elif size - minimumsize == 2:
-		for row in uniques:
-			try:
-				values = dicttotal[str(row)]
-				if isinstance(values,dict):
-					values.update(dicttotal)
-					dicttotal[str(row)] = values
-			
-			except KeyError:
-				dicttotal[str(row)] = {}
-
-		for row in sizeddf['total'].values.tolist():
-			dicttotal[str(row)] = areaname
-
-		sizeddf,uniques = get_size_uniques(data,minimumsize+1)
-
-		for row in uniques:
-			if len(row) == minimumsize + 1:
-				if isinstance(dicttotal[row[:-1]],dict):
-					dicttotal[row[:-1]][row] = {}
-		for row in sizeddf['total'].values.tolist():
-			if isinstance(dicttotal[row[:-1]],dict):
-				dicttotal[row[:-1]][row] = areaname		
-		return dicttotal
-	elif size - minimumsize == 1:
-		for row in uniques:
-			try:
-				values = dicttotal[str(row)]
-				if isinstance(values,dict):
-					values.update(dicttotal)
-					dicttotal[str(row)] = values
-			
-			except KeyError:
-				dicttotal[str(row)] = {}
-
-		for row in sizeddf['total'].values.tolist():
-			dicttotal[str(row)] = areaname
-
-		return dicttotal
-	return ''
-
-# given a set of upper precisions selects the csv files
-# in the directory with the lower and upper for each
-# and returns a dictionary object 
-def make_rangedicts(maxlist):
-	total = []
-	minimumsize = 1000
-	for row in maxlist:
-		datalist1 = read_sizes(row)
-		total += datalist1
-		minval = row - 1
-		if minval < minimumsize:
-			minimumsize = minval
-	dictionary = {}
-	for row in total:
-		dictionary = make_dict_range(row[0],row[1],minimumsize,dictionary=dictionary)
-
-	return dictionary
-
-# makes a list of each df table given
-# then after finding the minimum total value
-# drills each dict up to the highest (lowest len) value
-def make_drilled_dicts(newlist,mintotal1):
-	mintotal = 100
-	dictlist = []
+	minsize = data['total'].str.len().min()
+	for key,value in kwargs.iteritems():
+		if key == 'minsize':
+			minsize = value
+	current = maxsize - 1
+	uniques = []
 	count = 0
-	for row in newlist:
-		# getting areaname
-		areaname = str(np.unique(row['AREA']).tolist()[0])
-		
-		# getting minimum value
-		minval = row['total'].str.len().min()
+	while not current == minsize - 1:
+		current = current - 1
 
-		# making ind dict
-		inddict = make_dict_range(row,areaname,minval,mintotal1)
-		
-
-		# appending dict to dict list
-		if not inddict == '':
-			dictlist.append(inddict)
-
-		# logic for getting the lowest value within all given 
-		# tables
-		if mintotal > minval:
-			mintotal = minval
-		print 'Making Each Drilled Dictionary. [%s / %s] [1 / 3]' % (count,len(newlist))
-		count += 1
-	newdictlist = []
-	maxval = 0
-	count = 0
-	# iterating through each value in dictlist
-	for inddict,row in itertools.izip(dictlist,newlist):
-		# getting areaname
-		areaname = row['AREA'].unique()[0]
-		
-		# getting minimum value
-		minval = row['total'].str.len().min()
-		if not minval - mintotal == 0:
-			inddict2 = drill_dictionary(inddict,mintotal)
-			#inddict2 = inddict
-		else:
-			inddict2 = inddict
-		if row['total'].str.len().max() > maxval:
-			maxval = row['total'].str.len().max()
-		newdictlist.append(inddict2)
-		count+= 1
-		print 'Pruning the dicts upwards and clipping keys [%s / %s] [2 / 3]' % (count,len(newlist))
-	return newdictlist,mintotal,maxval
-
-def mergedicts(dict1, dict2):
-    for k in set(dict1.keys()).union(dict2.keys()):
-        if k in dict1 and k in dict2:
-            if isinstance(dict1[k], dict) and isinstance(dict2[k], dict):
-                yield (k, dict(mergedicts(dict1[k], dict2[k])))
-            else:
-                # If one of the values is not a dict, you can't continue merging it.
-                # Value from second dict overrides one in first and we move on.
-                yield (k, dict2[k])
-                # Alternatively, replace this with exception raiser to alert you of value conflicts
-        elif k in dict1:
-            yield (k, dict1[k])
-        else:
-            yield (k, dict2[k])
-
-def merge(a, b, path=None):
-    "merges b into a"
-    if path is None: path = []
-    for key in b:
-        if key in a:
-            if isinstance(a[key], dict) and isinstance(b[key], dict):
-                merge(a[key], b[key], path + [str(key)])
-            elif a[key] == b[key]:
-                pass # same leaf value
-            else:
-            	pass
-        else:
-            a[key] = b[key]
-    return a
-
-def make_dict_attempt(newlist,mintotal):
-	drilleddict,minval,maxval = make_drilled_dicts(newlist,mintotal)
-
-	current = minval
-	dictionary = {}
-
-	total = drilleddict[0]
-	count = 0
-	for row in drilleddict[1:]:
-		print 'Merging Dictionaries [%s / %s] [3 / 3]' % (count,len(drilleddict))
-		total = dict(mergedicts(total,row))
-		count += 1
-	total['min'] = minval
-	total['max'] = maxval
-	return total
-
-def make_json(dictionary,filename):
-	with open(filename,'wb') as f:
-		json.dump(dictionary,f)
-	print 'Wrote Json.'
-
-def read_json(filename):
-	with open(filename,'rb') as f:
-		return json.load(f)
-
-
-
-# the map function for the flat dictionary
-def find_root_index(thash,indexdict,minsize,areadict):
-	try:
-		size = minsize
-		current = indexdict
-		while isinstance(current,dict):
-			if size == minsize:
-				current = current.get(thash[:size],'')
-			else:
-				current = current.get(thash[size-1],'')
-			size += 1
-		return areadict.get(current,'')
-	except IndexError:
-		return ''
-
-# the map function for the flat dictionary
-def find_no_area_index(thash,indexdict,minsize):
-	try:
-		size = minsize
-		current = indexdict
-		while isinstance(current,dict):
-			if size == minsize:
-				current = current.get(thash[:size],'')
-			else:
-				current = current.get(thash[size-1],'')
-			size += 1
-		return current
-	except IndexError:
-		return ''
-
-# checks to see if the value going into area index
-# has a geohash if not returns a df with a gehahs column
-def check_geohash(data):
-	for row in data.columns.values.tolist():
-		if row == 'GEOHASH':
-			return data
-	data = bl.map_table(data,12,map_only=True)
-	return data
-
-# maps the index dictonary against an area index
-def area_index(data,indexdict):
-	# checking to see if a geoahash column exists if not adds one
-	data = check_geohash(data)
-
-	ind = False
-	try:
-		areadict = indexdict['areas']
-	except KeyError: 
-		ind = True
+		tempuniques = np.unique(data['total'].str[:current+1]).tolist()
+		uniques = np.unique(uniques + tempuniques).tolist()	
 	
+	return uniques,maxsize,minsize
 
-	min = indexdict['min'] 
-	areas = []
-	ghashs = data['GEOHASH'].values.tolist()
-	if ind == False:
-		for i in ghashs:
-			areas.append(find_root_index(*(i,indexdict,min,areadict)))
-	else:
-		for i in ghashs:
-			areas.append(find_no_area_index(*(i,indexdict,min)))
 
-	data['AREA'] = areas
-	return data
+def merge_dicts(*dict_args):
+    '''
+    Given any number of dicts, shallow copy and merge into a new dict,
+    precedence goes to key value pairs in latter dicts.
+    '''
+    result = {}
+    for dictionary in dict_args:
+        result.update(dictionary)
+    return result
+
+# makes a dictionary out of upper level uniques
+# and lower level data
+def make_dict(data,upperuniques,maxsize,minsize,filename):
+	# making upper uniques into a datarame
+	upperuniques = pd.DataFrame(upperuniques,columns=['total'])
+	upperuniques['STRING'] = '"' + upperuniques['total'] + '":"na"'
+	upperuniques = upperuniques['STRING'].values.tolist()
+	print 'done upper uniques'
+
+	# concatenating data
+	print 'done concatenating data'
+
+
+	data['STRING'] = '"' + data['total'] + '":"' + data['AREA'] + '"'
+
+	minsize = '"min":%s' % minsize
+	maxsize = '"max":%s' % maxsize
+
+	data = upperuniques + data['STRING'].values.tolist()
+
+	data = data + [minsize,maxsize]
+
+	string = ', '.join(data)
+	string = '{%s}' % string
+	print 'string made'
+
+	with open(filename,'wb') as f:
+		f.write(string)
+
+
+# makes a dictionary out of upper level uniques
+# and lower level data
+def make_dict_files(dfs,upperuniques,maxsize,minsize,filename):
+	# making upper uniques into a datarame
+	upperuniques = pd.DataFrame(upperuniques,columns=['total'])
+	upperuniques['AREA'] = 'na'
+	upperuniques = upperuniques.set_index('total')
+
+	print 'done upper uniques'
+
+	# concatenating data
+	print 'done concatenating data'
+
+	total =[upperuniques]
+	generdata = gener(dfs)
+	ind = 0
+	count = 0
+	while ind == 0:
+		try:
+			temp = next(generdata)
+			temp = temp.set_index('total')
+			count += 1
+			print '[%s/%s] Combing Strings' % (count,len(dfs))
+			total.append(temp)
+			
+		except StopIteration:
+			ind = 1
+
+	count = 0
+	d = {'min':minsize,'max':maxsize}
+	for row in total:
+		count += 1
+		d['df%s' % count] = row['AREA']
+
+	dd.io.save(filename, d)
+
+
+# makes and polygon index for 
+# the total dataframe given
+def make_polygon_index(data):
+	# reducing the uniques and getting min and max size
+	uniques,maxsize,minsize = reduce_to_min(data)
+
+	return make_dict(data,uniques,maxsize,minsize)
+
+# makes a polygon index from a list of csv files
+def make_polygon_index_files(filenames,outfilename):
+	newlist = []
+	totalmin = 100
+	totalmax = 0
+	count = 0
+	for row in filenames:
+		temp = pd.read_csv(row)
+		minsize = temp['total'].str.len().min()
+		maxsize = temp['total'].str.len().max()
+		if minsize < totalmin:
+			totalmin = minsize
+		if maxsize > totalmax:
+			totalmax = maxsize
+		newlist.append(temp)
+		count += 1
+		print '[%s/%s] Reading' % (count,len(filenames))
+	uniques,totalmax,totalmin = split_frame(newlist,totalmin,totalmax)
+
+	make_dict_files(newlist,uniques,totalmax,totalmin,outfilename)
+
+# opens a file and parse lines
+def openfile(filename):
+	with open(filename,'rb') as f:
+		return str.split(f.read(),'\n')
+
+# combines csv files to a big csv much much faster
+def combine_csvs(files,outfilename,**kwargs):
+	min = False
+	for key,value in kwargs.iteritems():
+		if key == 'min':
+			min = value
+
+
+	count = 0
+	totalcount = 0
+	for filename in files:
+		data = openfile(filename)
+
+		if count == 0:
+			count = 1
+			total = data
+		else:
+			count+= 1
+			total += data[1:]
+		if count == 1000:
+			count = 1
+			totalcount += 1000
+			print '[%s/%s]' % (totalcount,len(files))
+	total = '\n'.join(total)
+
+	with open(outfilename,'wb') as f:
+		f.write(total)
+
 
 # makes a test block and returns the points for the index
 def make_test_block(ultindex,number):
+	from mapkit import unique_groupby
 	#indexdict = read_json('states_ind.json')
-	extrema = {'n':88.9,'s':-30.0,'e':100.0,'w':-180.0}
-	data = bl.random_points_extrema(number,extrema)
-	data = bl.map_table(data,8,map_only=True)
-
+	extrema = {'n': 50.449779,'s': 20.565774,'e':-64.493017,'w':-130.578836}
+	data = pg.random_points_extrema(number,extrema)
+	data = ult.map_table(data,12,map_only=True)
 	s = time.time()
 	data = area_index(data,ultindex)
 	print 'Time for just indexing: %s' % (time.time() - s)
-
 	data = data[data['AREA'].str.len() > 0]
-	data = bl.unique_groupby(data,'AREA')
+	data = unique_groupby(data,'AREA',hashfield=True,small=True)
 	data['color'] = data['COLORKEY']
 	return data
 
-# lints points for non hashable data types
-def lint_values(data):
-	for row in data.columns.values.tolist():
-		if 'lat' in str(row).lower():
-			lathead = row
-		elif 'long' in str(row).lower():
-			longhead = row
-	
-	data = data[(data[lathead] < 90.0) & (data[lathead] > -90.0)]
-	data = data.fillna(value=0)
+# maps one geohash to what it needs to be
+def one_polygon_index(ghash):
+	global minsize
+	global maxsize
+	global ultindex
 
-	return data[lathead].astype(float).values.tolist(),data[longhead].values.tolist()
+	current = minsize
+	while current < maxsize:
+		output = ultindex.get(ghash[:current],'')
+		#print output,ghash,current,ghash[:current]
+		# logic for continuing or not
+		if output == 'na':
+			current += 1
+		elif output == '':
+			return ''
+		else:
+			return output
 
 
-# maps the index dictonary against an area index
-def area_index2(data,indexdict):
-	min = indexdict['min'] 
-	areas = []
-	
-	# getting geohashs
-	lats,lngs = lint_values(data)
-	ds = []
+# maps a geohash to a given area index
+# will again use global dict instead of function input
+def area_index(data,index):
+	global minsize
+	global maxsize
+	global ultindex
+	ultindex = index
+	minsize = ultindex['min']
+	maxsize = ultindex['max']
 
-	for i in range(0,len(lats)):
-		oi = (lats[i],lngs[i],12)
- 		#newlist.append(oi)
- 		ds.append(geohash.encode(*oi))
- 		areas.append(find_root_index(*(ds[-1],indexdict,min)))
-	data['AREA'] = areas
-	data['GEOHASH'] = ds
+	# mapping all geohashs to areas
+	data['AREA'] = data['GEOHASH'].map(one_polygon_index)
+
 	return data
+
+
+# kwargs for arguments that will all be completed 
+# at teh same time
+def ult_index(data,**kwargs):
+	line_index = False
+	latlongheaders = False
+	seg_index = False
+	for key,value in kwargs.iteritems():
+		if key == 'line_index':
+			line_index = value
+		if key == 'latlongheaders':
+			latlongheaders = value
+		if key == 'seg_index':
+			seg_index = value
+
+	lats,lngs,data = lint_values(data,latlongheaders)
+
+	if seg_index == False and not line_index == False:
+		# execute line index code here
+		#data[['GEOHASH','LINEID']] = gener_vals(lats,lngs,line_index,polygon_index)
+		data['GEOHASH'],data['LINEID'] = gener_vals(lats,lngs,line_index,seg_index)
+		return data
+	elif not seg_index == False and not line_index == False:
+		data['GEOHASH'],data['LINEID'],data['DISTANCE'],data['PERCENT'] = gener_vals(lats,lngs,line_index,seg_index)
+		return data
+
+
+# the second part of the actual geohashing process
+# where the actual geohashing occurs
+def gener_vals(lats,lngs,line_index,seg_index):
+	distances = []
+	lines = []
+	ghashs = []
+	percents = []
+	ds = []
+	if seg_index == False and not line_index == False:
+		size = line_index['size']
+		for i in range(0,len(lats)):
+			oi = (lats[i],lngs[i],12)
+	 		#newlist.append(oi)
+	 		ghash = geohash.encode(*oi)
+	 		lineid = line_index.get(ghash[:size],'')
+	 		ghashs.append(ghash)
+	 		lines.append(lineid)
+	 		
+	 		#ds.append([ghash,lineid])
+	 	return ghashs,lines
+	 	#return pd.DataFrame(ds,columns=['GEOHASH','LINEID'])
+	elif not seg_index == False and not line_index == False:
+		size = line_index['size']
+		for i in range(0,len(lats)):
+			oi = (lats[i],lngs[i],12)
+	 		#newlist.append(oi)
+	 		ghash = geohash.encode(*oi)
+	 		lineid = line_index.get(ghash[:size],'')
+	 		if not lineid == '':
+	 			distance,percent = kt.get_distance(oi[0],oi[1],ghash[:size],lineid,seg_index[str(lineid)])
+	 		if lineid == '' or percent > 100 or percent < 0:
+	 			distance,percent = '',''
+
+	 		ghashs.append(ghash)
+	 		lines.append(lineid)
+	 		distances.append(distance)
+	 		percents.append(percent)
+	 	return ghashs,lines,distances,percents
+
+
+# makes a test block and returns the points for the index
+def make_test_block(ultindex,number):
+	from mapkit import unique_groupby
+	#indexdict = read_json('states_ind.json')
+	extrema = {'n': 50.449779,'s': 20.565774,'e':-70.493017,'w':-130.578836}
+	data = random_points_extrema(number,extrema)
+	data = map_table(data,12,map_only=True)
+	s = time.time()
+	data = area_index(data,ultindex)
+	print 'Time for just indexing: %s' % (time.time() - s)
+	data = data[data['AREA'].str.len() > 0]
+	data = unique_groupby(data,'AREA',hashfield=True,small=True)
+	data['color'] = data['COLORKEY']
+	return data
+
 
 def gener(list):
 	for row in list:
@@ -695,66 +359,228 @@ def set_wrapper(arg):
 	make_set(data,field,filename,folder=folder,csv=True)
 	return []
 
+# creates a bounds dataframe taht can be used to display
+# boundries, input is the total boundry df
+def stringify_bounds(data,m2):
+	newlist = []
+	for name,group in data.groupby(['AREA','PART']):
+		group = group.reset_index()
+		coords = group[['LONG','LAT']].values.tolist()
+		coords = stringify(coords)
+		newlist.append([m2[str(name[0])],name[1],coords])
+	newlist = pd.DataFrame(newlist,columns=['AREA','PART','coords'])
+	return newlist
+
+
+def make_files(dflist):
+	files = []
+	with pd.HDFStore('progress.h5') as progress:
+		for alist in dflist:
+			print alist
+			files.append(progress[str(alist)])			
+	print 'read files'
+	return files
+
+# this function creates an hdf5 output that contains
+# an ultindex dictionary the actual output
+# assumes input will be progress h5 in the current directroy
+# kwargs will control how the output is handle mutliple dict etc.
+def make_h5_output(filename,**kwargs):
+	output = 'single'
+	for key,value in kwargs.iteritems():
+		if key == 'output':
+			output = value
+
+
+	# reading in progress h5 file 
+	with pd.HDFStore('progress.h5') as progress:
+		completed = progress.keys()
+		newcompleted = []
+
+		print 'read'
+		# getting alignment df input into make_set
+		alignment = progress['/initial']
+		print 'here1'
+		areamask,m2 = construct_area_mask(np.unique(alignment['AREA'].astype(str)).tolist())
+
+
+		# getting all completed dfs
+		print 'here2'
+		for row in completed:
+			if not row == '/initial' and not row == '/areamask':
+				newcompleted.append(row)
+		
+		dflist = []
+		print 'hre'
+		for row in newcompleted:
+			if output == 'single':
+				dflist.append(progress[str(row)])
+			else:
+				dflist.append(str(row))
+	
+	# logic for a single output dictionary for either progress
+	# or completion should be used with smaller indexs
+	if output == 'single':
+		# stringify bounds
+		bounds = stringify_bounds(alignment,m2)
+
+		# concatenating all the dataframes
+		dflist = pd.concat(dflist)
+
+		# getting the min and maximum
+		minsize = dflist['total'].str.len().min()
+		maxsize = dflist['total'].str.len().max()
+
+
+		# creating the drilled dataframe 
+		uniques,b,c = reduce_to_min(dflist)
+		total2 = pd.DataFrame(np.unique(uniques).tolist(),columns=['total'])
+		total2['AREA'] = 'na'
+
+		# setting up dictionaries (combing the finished dataframes)
+		dflist = dflist.set_index('total')
+		total2 = total2.set_index('total')
+		dflist = dflist['AREA'].to_dict()
+		total2 = total2['AREA'].to_dict()
+
+		totaldict = merge_dicts(*[total2,dflist])
+
+		totaldict['min'] = minsize
+		totaldict['max'] = maxsize
+
+		d = {'ultindex':totaldict,'alignmentdf':bounds,'areamask':areamask}
+
+		dd.io.save(filename,d)
+
+		print 'Wrote output %s with ultindex,bounds, and areamask.' 
+
+
+	if output == 'regions':
+		# stringify bounds
+		bounds = stringify_bounds(alignment,m2)
+
+		dflist = make_files(dflist)
+		newdict = {}
+		mins = []
+		maxs = []
+		for row in dflist:
+			minsize = row['total'].str.len().min()
+			maxsize = row['total'].str.len().max()
+			mins.append(minsize)
+			maxs.append(maxsize)
+			print row
+			row['G1'] = row['total'].str[:2]
+			for name,group in row.groupby('G1'):
+				try:
+					newdict[name].append(group)
+				except KeyError:
+					newdict[name] = [group]
+
+		size = len(newdict.keys())
+		count = 0
+		ultindex = {}
+		for i in newdict.keys():
+			count += 1
+			df = pd.concat(newdict[i])
+			print 'first concat'
+			df = df[['total','AREA']]
+			uniques,b,c = reduce_to_min(df)
+			df1 = pd.DataFrame(uniques,columns=['total'])
+			df1['AREA'] = 'na'
+			df = pd.concat([df1,df])
+			df = df.set_index('total')
+			df = df['AREA'].to_dict()
+			# adding min and max to ultindex
+			df['min'] = min(mins)
+			df['max'] = max(maxs)
+
+			ultindex[str(i)] = df
+
+			#df.to_csv(str(i)+'.csv',index=False)
+			print '[%s / %s]' % (count,size)
+		
+		# adding min and max to ultindex
+		ultindex['min'] = min(mins)
+		ultindex['max'] = max(maxs)
+
+		d = {'ultindex':ultindex,'alignmentdf':bounds,'areamask':areamask}
+
+		dd.io.save(filename,d)
+
+		print 'Wrote output %s with ultindex,bounds, and areamask.' 
+
+
+def make_wrapper(args):
+	data,areamask2 = args
+	s = time.time()
+	count = 0
+	for name,group in data.groupby('AREA'):
+		# making ring index for each alignment
+		s = time.time()
+		total = make_ring_index(group)
+		total['AREA'] = areamask2[str(name)]
+		#total['AREA'] = areamask2[str(name)]
+
+
+		minval = total['total'].str.len().min()
+		maxval = total['total'].str.len().min()
+
+		count += 1
+		print count		
+		with pd.HDFStore('progress.h5') as progress:
+			progress[str(name)] = total
+	return []
+
+
 # constructs a ult-index that can be used in 
 # functions like area_index to quickly geofence polygons
-def make_set(data,field,filename,**kwargs):
+def make_set(data,field,**kwargs):
 	csv = False
 	folder = False
 	resume = False
 	sc = False
+	
 	for key,value in kwargs.iteritems():
-		if key == 'csv':
-			csv = value
 		if key == 'folder':
 			folder = value
-		if key == 'resume':
-			resume = value
-		if key == 'sc':
-			sc = value
 
-	if not folder == False:
-		# creating folder if one doesn't already exist
-		if not os.path.exists(folder):
-			os.makedirs(folder)
-
-	if csv == True:
-		if folder == False:
-			prefix = ''
-		else:
-			# creating folder if one doesn't already exist
-			if not os.path.exists(folder):
-				os.makedirs(folder)			
-			prefix = folder + '/'
 
 	# constructing areas mask
 	areamask1,areamask2 = construct_area_mask(np.unique(data[field].astype(str)).tolist())
+	sizeareas = len(np.unique(data[field])) + 2
+	try:
+		with pd.HDFStore('progress.h5') as progress:
+			try:
+				progress['initial'] = data
+			except:
+				progress = pd.HDFStore('progress.h5')
+				progress['initial'] = data
+				
+			completed = progress.keys()
+			startcount = len(completed)
+			completed = [row[1:] for row in completed]
+			print len(completed)
+			data['BOOL'] = data[field].isin(completed)
+			data = data[data['BOOL'] == False]
+	except:
+		print 'here'
+		progress = pd.HDFStore('progress.h5')
+		progress.close()
+		startcount = 0
 
-	# logic for if you want to continue from 
-	# what is complete from another directory
-	if resume == True:
-		files = get_filetype(folder,'csv')
-		completedareas = []
-		# getting completed areas
-		for row in files:
-			row = str.split(row,'/')[1]
-			row = str.split(row,'.')[0]
-			completedareas.append(row)
+	for key,value in kwargs.iteritems():
+		if key == 'sc':
+			sc = value
 
-		# getting unique areas and putting into df
-		df = pd.DataFrame(np.unique(data['AREA']).tolist(),columns=['AREA'])
-		data['BOOL'] = data['AREA'].astype(str).isin(completedareas)
-		noncompletedareas = data[data['BOOL']==False]
-		data = noncompletedareas
-	
 	# logic for handling spark context
 	if not sc == False:
 		partialargs = np.array_split(data,8)
 		newlist = []
 		for row in partialargs:
-			newlist.append([row,'AREA',filename,folder])
+			newlist.append([row,areamask2])
 		args = newlist
 		instance = sc.parallelize(args)
-		instance.map(set_wrapper).collect()
+		instance.map(make_wrapper).collect()
 
 	mintotal = 100
 	maxtotal = 0
@@ -764,43 +590,66 @@ def make_set(data,field,filename,**kwargs):
 	# grouping each area on the big df
 	# so that analysi and indexs for each polygon
 	# can be made
-	count = 0
+	count = startcount
 	totaltime = 0
-	for name,group in data.groupby(field):
-		# making ring index for each alignment
-		s = time.time()
-		total = make_ring_index(group)
-		total['AREA'] = areamask2[str(name)]
-		#total['AREA'] = areamask2[str(name)]
+	count2 = 0
+	totals = []
+	if not folder == False:
+		files = get_filetype(folder,'csv')
+		for row in files:
+			s = time.time()
+			total = pd.read_csv(row)
+			name = str.split(row,'.')[0]
+			name = str.split(name,'/')[1]
+			print name
+			try:
+				total['AREA'] = total['AREA'].astype(int)
+			except:
+				pass
+			if not len(total) == 0:
+				totals.append(total)
+				count2 += 1
+				if count2 == 1000:
+					totals = pd.concat(totals)
+					count2 = 0
+					with pd.HDFStore('progress.h5') as progress:
+						progress[areamask2[str(name)]] = totals
+					totals = []
+				totaltime += time.time() - s
+				count += 1
+				avg = round(totaltime / float(count - startcount),2)
+				print 'Areas Complete: [%s / %s], AVGTIME: %s s' % (count,sizeareas,avg)
+	else:
+		for name,group in data.groupby(field):
+			# making ring index for each alignment
+			s = time.time()
+			total = make_ring_index(group)
+			total['AREA'] = areamask2[str(name)]
+			#total['AREA'] = areamask2[str(name)]
 
-		# logic for writing csv out to file/folder
-		if csv == True:
-			csvfilename = prefix + str(name) + '.csv'
-			total.to_csv(csvfilename,index=False)
+			# logic for writing csv out to file/folder
+			if csv == True:
+				csvfilename = prefix + str(name) + '.csv'
+				total.to_csv(csvfilename,index=False)
 
-		minval = total['total'].str.len().min()
-		maxval = total['total'].str.len().min()
+			minval = total['total'].str.len().min()
+			maxval = total['total'].str.len().min()
 
-		if minval < mintotal:
-			mintotal = minval
-		if maxval > maxtotal:
-			maxtotal = maxval
-		totaltime += time.time() - s
-		count += 1
+			if minval < mintotal:
+				mintotal = minval
+			if maxval > maxtotal:
+				maxtotal = maxval
+			totaltime += time.time() - s
+			count += 1
+			print total
+			avg = round(totaltime / float(count - startcount),2)
+			print 'Areas Complete: [%s / %s], AVGTIME: %s s' % (count,sizeareas,avg)
+			
+			with pd.HDFStore('progress.h5') as progress:
+				progress[str(name)] = total
 
-		avg = round(totaltime / float(count),2)
-		print 'Areas Complete: [%s / %s], AVGTIME: %s s' % (count,sizedisplay,avg)
-		totals.append(total)
 
-	# making the ult index
-	ultindex = make_dict_attempt(totals,mintotal)
-
-	# reading json to memory again
-	# this is to finally bind the mask 
-	ultindex['areas'] = areamask1
-
-	# finally writing out
-	make_json(ultindex,filename) 
+	return areamask1,mintotal,maxtotal
 
 
 # collecting geohashs
@@ -826,55 +675,11 @@ def get_geohashs(b):
 
 
 
+def make_json(dictionary,filename):
+	with open(filename,'wb') as f:
+		json.dump(dictionary,f)
+	print 'Wrote Json.'
 
-# reads a list of csv files 
-# that contain completly ult indexs 
-# for one polygon each
-def read_dfs(list):
-	mintotal = 100
-	maxtotal = 0
-	totals = []
-	for row in list:
-		total = pd.read_csv(row)
-		
-		# getting max/min geohashs size of current df
-		minval = total['total'].str.len().min()
-		maxval = total['total'].str.len().min()
-
-		# checking to see if current val is the smallest or largest
-		if minval < mintotal:
-			mintotal = minval
-		if maxval > maxtotal:
-			maxtotal = maxval
-		
-		totals.append(total)
-	return totals,mintotal,maxtotal
-
-# function to make a dictonary that is currently 
-# in which the ult index is currently csv files 
-# in a folder 
-def make_progress_dict(folder,filename):
-	# getting all appropriate csv files
-	files = get_filetype(folder,'csv')
-
-	# reading csv files into memory
-	totals,mintotal,maxtotal = read_dfs(files)
-	
-	# making the ult index
-	ultindex = make_dict_attempt(totals,mintotal)
-
-	# writing the large uncleansed index to file
-	make_json(ultindex,filename)
-
-	# cleansing file to reduce file size
-	# this is the easier of ways to cleanse geohash
-	# i.e. this step and following are
-	# simply procedures to reduce memory footprint of json
-	#make_write(filename,mintotal,maxtotal)
-
-	# reading json to memory again
-	# this is to finally bind the mask 
-	#ultindex['areas'] = areamask
-
-	# finally writing out
-	#make_json(ultindex,filename) 
+def read_json(filename):
+	with open(filename,'rb') as f:
+		return json.load(f)

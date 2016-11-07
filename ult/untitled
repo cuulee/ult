@@ -1,0 +1,62 @@
+
+def openfile(filename):
+	with open(filename,'rb') as f:
+		return f.read()
+
+def findnextcomma(pos,data):
+	value = data[pos]
+	while not value == ',':
+		pos += 1
+		value = data[pos]
+	return pos
+
+def getnewpos(list,data):
+	for row in list:
+		a = findnextcomma(row,data)
+		newlist.append(a)
+	return [0] + newlist + [len(data) - 1]
+
+def get_delta(index1,index2,data):
+	return data[index1:index2]
+
+# splits json file to read
+def splitfile(filename):
+	data = openfile(filename)[1:-1]
+	size = len(data)
+	step = size / 8
+	d = np.array(range(1,7))
+	d = d * step
+	d = d.tolist()
+	count = 0
+	things = []
+	for row in d[:4]:
+		if count == 0:
+			count = 1
+		else:
+
+			thing = get_delta(oldrow,row,data)
+			if thing[-1] == ',':
+				thing = thing[:-1]
+			thing = '{%s}' % thing
+			things.append(thing)
+		oldrow = row
+	return things
+
+def map_load(data):
+	data = ','.join(data.tolist())
+	data = '{%s}' % data
+	return json.load(data)
+
+
+def read_json(filename):
+	with open(filename,'rb') as f:
+		return json.load(f)
+
+
+def time_read():
+	s = time.time()
+	d = read_json('states.json')
+	print time.time() - s
+	s = time.time()
+	d = ult.read_json('states.json')
+	print time.time() - s

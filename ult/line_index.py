@@ -1,10 +1,11 @@
 import pandas as pd
 import numpy as np
 import itertools
-import berrl as bl
 import geohash
 import time
 import json
+from pipegeohash import map_table,list2df,df2list
+import ult
 
 # gets the extrema dictionary of the alignment df
 def get_extrema(df):
@@ -42,8 +43,10 @@ def get_extrema(df):
 
 
 # returns a set of points that traverse the linear line between two points
-def generate_points(number_of_points,point1,point2,areaindex):
+def generate_points_geohash(number_of_points,point1,point2,areaindex,size):
 	# getting x points
+	geohashlist = []
+
 	x1,x2 = point1[0],point2[0]
 	xdelta = (float(x2) - float(x1)) / float(number_of_points)
 	xcurrent = x1
@@ -53,16 +56,16 @@ def generate_points(number_of_points,point1,point2,areaindex):
 	ydelta = (float(y2) - float(y1)) / float(number_of_points)
 	ycurrent = y1
 
-	newlist = [['LONG','LAT']]
+	geohashlist = ['GEOHASH',geohash.encode(point1[1],point1[0],size)]
 
 	count = 0
 	while count < number_of_points:
 		count += 1
 		xcurrent += xdelta
 		ycurrent += ydelta
-		newlist.append([xcurrent,ycurrent,areaindex])
-
-	return newlist
+		geohashlist.append(geohash.encode(ycurrent,xcurrent,size))
+	geohashlist.append(geohash.encode(point2[1],point2[0],size))
+	return geohashlist
 
 # given a point1 x,y and a point2 x,y returns distance in miles
 # points are given in long,lat geospatial cordinates
@@ -72,62 +75,6 @@ def distance(point1,point2):
 	return np.linalg.norm(point1-point2)
 
 
-# extends a new table down from a post gis row and header
-def extend_geohashed_table(header,extendrow,precision):
-	count=0
-	newheader=[]
-	newvalues=[]
-	for a,b in itertools.izip(header,extendrow):
-		if a=='st_asewkt':
-			geometrypos=count
-		elif a=='geom':
-			pass
-		else:
-			newheader.append(a)
-			newvalues.append(b)
-		count+=1
-
-	# adding values to newheader that were in the text geometry
-	newheader=newheader+['LAT','LONG','DISTANCE','GEOHASH']
-	
-	# parsing through the text geometry to yield what will be rows
-	try: 
-		geometry=extendrow[geometrypos]
-		geometry=str.split(geometry,'(')
-		geometry=geometry[-1]
-		geometry=str.split(geometry,')')
-		geometry=geometry[:-2][0]
-		geometry=str.split(geometry,',')
-
-		# setting up new table that will be returned as a dataframe
-		newtable=[newheader]
-		firstrow = geometry[0]
-		firstrow = str.split(firstrow,' ')
-		olddist = float(firstrow[-1])
-		ghash = ''
-		geohashs = []
-		for row in geometry:
-			row = str.split(row,' ')
-			distance = float(row[-1]) - olddist 
-			lat = float(row[1])
-			long = float(row[0])
-			try: 
-				hash = geohash.encode(float(lat), float(long), precision)
-				if not hash == ghash:
-					ghash = hash
-					geohashs.append(ghash)
-				newrow = newvalues+[lat,long,distance,hash]
-				newtable.append(newrow)
-			except Exception:
-				pass
-			olddist = float(row[-1])
-	except Exception:
-		newtable=[['GEOHASH'],['']]
-
-	# taking table from list to dataframe
-	newtable = bl.list2df(newtable)
-
-	return geohashs,newtable
 
 def get_cords_json(coords):
 	data = '{"a":%s}' % coords.decode('utf-8') 
@@ -162,80 +109,41 @@ def fill_geohashs(data,size):
 	count = 0
 
 	count = 0
-	newlist = []
+	geohashlist = []
 	for row in data:
 		if count == 0:
 			count = 1
 		else:
 			dist = distance(oldrow[:-1],row[:-1])
-			if dist > hashsize / 10.0:
-				number = (dist / hashsize) * 10.0
+			if dist > hashsize / 5.0:
+				number = (dist / hashsize) * 5.0
 				number = int(number)
-				newlist += generate_points(number,oldrow[:-1],row[:-1],row[2])[1:]
+				geohashlist += generate_points_geohash(number,oldrow[:-1],row[:-1],row[2],size)[1:]
 			else:
-				newlist.append(row)
+				point = row[:-1]
+				geohashlist.append(geohash.encode(point[1],point[0],size))
 		oldrow = row
-
-
+	a = geohashlist
+	indexes = np.unique(a, return_index=True)[1]
+	geohashlist = [a[index] for index in sorted(indexes)]
+	newlist = zip(geohashlist,[row[2]] * len(geohashlist))
 	return newlist
 
-# for a given line alignment gets the segment split parameters
-# hopefully a function can be made to properly make into lines
-def get_seg_splits(data):
-	data = bl.map_table(data,9,map_only=True)
-	extrema = get_extrema(data)
 
-	# getting upper lefft and lowerright point
-	ul = [extrema['w'],extrema['n']]
-	lr = [extrema['e'],extrema['s']]
-
-
-	# getting geohash for ul and lr
-	# assuming 8 for the time being as abs min
-	ulhash = geohash.encode(ul[1],ul[0],9)
-	lrhash = geohash.encode(lr[1],lr[0],9)
-
-	lat,long,latdelta,longdelta = geohash.decode_exactly(ulhash)
-
-	latdelta,longdelta = latdelta * 2.0,longdelta * 2.0
-
-	hashsize = ((latdelta ** 2) + (longdelta ** 2)) ** .5
-
-	count = 0
-	for row in data.columns.values.tolist():
-		if 'lat' in str(row).lower():
-			latheader = row
-		elif 'long' in str(row).lower():
-			longheader = row
-		count += 1
-
-
-	count = 0
-	newlist = []
-	for row in data[[longheader,latheader]].values.tolist():
-		if count == 0:
-			count = 1
-		else:
-			dist = distance(oldrow,row)
-			if dist > hashsize / 10.0:
-				number = (dist / hashsize) * 10.0
-				number = int(number)
-				newlist += generate_points(number,oldrow,row)[1:]
-			else:
-				newlist.append(row)
-		oldrow = row
-
-	newlist = pd.DataFrame(newlist,columns=['LONG','LAT'])
-	newlist = bl.map_table(newlist,9,map_only=True)
-	return newlist
+# making flat list non sorted
+def flatten_nonsorted(data):
+	ghashs = data['GEOHASH']
+	indexes = np.unique(ghashs, return_index=True)[1]
+	list = [ghashs[index] for index in sorted(indexes)]
+	return list	
 
 # making line segment index
-def make_line_index(data,**kwargs):
+def make_line_index(data,outfilename,**kwargs):
 	csv = False
 	uniqueid = False
 	filename = False
 	return_index = False
-	precision = 8
+	precision = 9
 	for key,value in kwargs.iteritems():
 		if key == 'csv':
 			csv = value
@@ -247,6 +155,7 @@ def make_line_index(data,**kwargs):
 			return_index = value
 		if key == 'precision':
 			precision = value
+
 	if uniqueid == False:
 		uniqueidheader = 'gid'
 	else:
@@ -254,6 +163,18 @@ def make_line_index(data,**kwargs):
 	if filename == False:
 		filename = 'line_index.csv'
 
+	# logic for whether or not the maxdistance
+	# has to be derived or can it be infered from a columnfield
+	maxbool = False
+	for row in data.columns.values.tolist():
+		if str(row).lower() == 'maxdistance':
+			maxbool = True
+
+	# logic for getting the dataframe needed to create the 
+	# distance dictionary
+	if maxbool == True:
+		dicttable = data.set_index('gid')
+		segdistance = dicttable['maxdistance'].to_dict()
 
 	# getting header and intializing
 	header = data.columns.values.tolist()
@@ -279,7 +200,8 @@ def make_line_index(data,**kwargs):
 		
 		#newdata = pd.DataFrame(row,columns=['LONG','LAT'])
 
-		newdata = fill_geohashs(coords,8)
+		newdata = fill_geohashs(coords,precision)
+
 		#newdata = get_seg_splits(newdata)	
 		#geohashs = np.unique(newdata['GEOHASH']).tolist()
 		#tempids = [str(row[position])] * len(geohashs)
@@ -295,128 +217,242 @@ def make_line_index(data,**kwargs):
 		count += 1
 
 	# creating the dataframe that will be used for the index
-	totaldf = pd.DataFrame(newlist,columns=['LONG','LAT','AREA'])
-	totaldf = bl.map_table(totaldf,8,map_only=True)
-	totaldf = totaldf[['GEOHASH','AREA']].groupby('GEOHASH').first()
-	totaldf = totaldf.reset_index()
+	totaldf = pd.DataFrame(newlist,columns=['GEOHASH','AREA'])
+
+	# sending total df into make_linejson
+	make_line_json(totaldf,segdistance,outfilename)
+
+
+	#totaldf = totaldf[['GEOHASH','AREA']].groupby('GEOHASH').first()
 	if return_index == True:
 		return totaldf
 	else:
-		totaldf.to_csv(filename,index=False)
 		return totaldf
 
 	return totaldf
 
-# create dictionary object from dataframe object
-def make_lineindex_dict(df):
-	segdict = {}
-	for row in df.values.tolist():
-		segdict[str(row[0])] = str(row[1])
-	return segdict
-
-# mapping each point to dictionary index
-def map_level_one(ghash):
-	global linedict
-	try:
-		return linedict[str(ghash)]
-	except KeyError:
-		return ''
-
-
-# encapsulating function for georeferencing a point on a line segement
-def map_lineindex(data,index,headercolumn,maxsize):
-	global linedict
-	linedict = index
-	data[headercolumn] = data['GEOHASH'].str[:maxsize].map(map_level_one)
+# makes a line index test block similiar to make
+# testblock from polygon_index
+def make_line_test(ultindex,number):
+	from pipegeohash import random_points_extrema
+	extrema = {'n':34.0841,'s':34.069241,'e':-118.25172,'w':-118.22172}
+	data = random_points_extrema(number,extrema)
+	data = map_table(data,12,map_only=True)
+	data = line_index(data,ultindex)
 	return data
 
-# creating a new index that will specifically contain
-# geohashs that contain multiple alignments
-# this may be used for a hiearchical correction against
-# speed, last routeid, passed a certain geohash along a route, i.e. a junction
-def make_multi_dict(data,headerval):
-	collision_dict = {}
-	for row in data.values.tolist():
+def applyfunc(array):
+	return len(np.unique(array))
+
+
+def one_line_index(ghash):
+	global ultindex
+	size = 8
+	ind = 0 
+	while ind == 0:
+		current = ultindex.get(ghash[:size],'')
+
+		if current == '' and size == 9:
+			#print ultindex.get(ghash[:8]+'_u','')
+			return ultindex.get(ghash[:8]+'_u','')
+
+		elif current == 'na':
+			size += 1
+		elif current == '':
+			return ''
+		else:
+			return current
+
+
+def line_index(data,index):
+	global ultindex
+	ultindex = index
+
+	data['LINEID'] = data['GEOHASH'].map(one_line_index)
+	return data
+
+
+def make_line_json(data,segdistance,outfilename):
+	olddata = data
+	data['GEOHASH1'] = data['GEOHASH'].str[:-1]
+
+	df = data[['GEOHASH1','AREA']].groupby(['GEOHASH1']).first()
+	grouped = data[['GEOHASH1','AREA']].groupby(['GEOHASH1'])
+	df['NO_SEGS'] = grouped['AREA'].apply(applyfunc)
+	df1 = df[df['NO_SEGS'] > 1]
+	df2 = df[df['NO_SEGS'] == 1]
+	df2 = df2.reset_index()[['GEOHASH1','AREA']]
+	df2.columns = ['GEOHASH','AREA']
+
+	newdata = df.loc[df1.index]
+	newdata = newdata.reset_index()
+	newdata.to_csv('solves.csv',index=False)
+	uniques =  np.unique(newdata['GEOHASH1']).tolist()
+
+
+
+	data['BOOL'] = olddata['GEOHASH'].str[:-1].isin(uniques)
+	data = data[data['BOOL'] == True]
+	data = data[['GEOHASH','AREA']]
+	data1 = df2
+	data['GEOHASH1'] = data['GEOHASH'].str[:8]
+	uniques = np.unique(data['GEOHASH1']).tolist()
+	outerdict = dict(zip(uniques,['na'] * len(uniques)))
+
+	grouplist = []
+	groupnames = []
+	count = 0
+	for name,group in data.groupby('GEOHASH1'):
+		areas = np.unique(group['AREA']).tolist()
+		maxdistance = 0
+		for area in areas:
+			if segdistance[area] > maxdistance:
+				maxdistance = segdistance[area]
+				maxarea = area
+		
+		# getting new areas not part of max area
+		newareas = []
+		for area in areas:
+			if not area == maxarea:
+				newareas.append(area)
+
+		groupname = [name+'_u',maxarea]
+
+		#group = group.set_index('GEOHASH')
+		#groupdict = group.to_dict()['AREA']
+		#groupdict[name+'_u'] = maxarea
+		#print groupdict.keys()
+		grouplist += newareas
+		groupnames.append(groupname)
+
+	data['BOOL'] = data['GEOHASH'].isin(grouplist)
+	data = data[data['BOOL'] == True]
+	data = data.set_index('GEOHASH')
+	data = data['AREA'].to_dict()
+
+
+	data1 = data1.set_index('GEOHASH')
+	data1 = data1['AREA'].to_dict()
+
+
+	ultindex = ult.merge_dicts(*[outerdict,data,data1])
+
+	for key,value in groupnames:
+		ultindex[key] = value
+
+	ult.make_json(ultindex,outfilename)
+
+# for a set of a cordinates gets the max distance
+def get_max_distance(coords):
+	count = 0
+	totaldistance = 0.
+	for point in coords:
+		if count == 0:
+			count = 1
+		else:
+			dist = distance(oldpoint,point)
+			totaldistance += dist
+		oldpoint = point
+	return totaldistance
+
+# gets a max distance table that will either
+# be added to a db or made into a dictionary
+def make_max_distance(data):
+	from nlgeojson import get_coordstring
+	cordbool = False
+	for row in data.columns.values.tolist():
+		if 'coords' == row:
+			cordbool = True
+	if cordbool == True:
+		cordheader = 'coords'
+	else:
+		cordheader = 'st_asekwt'
+	newlist = []
+	for gid,coords in data[['gid',cordheader]].values.tolist():
+		if cordbool == True:
+			coords = get_cords_json(coords)		
+		else:
+			coords = get_coordstring(coords)
+		maxdistance = get_max_distance(coords)
+		newlist.append([gid,maxdistance])
+
+	return pd.DataFrame(newlist,columns=['gid','MAXDISTANCE'])
+import mapkit as mk
+
+def add_columns_dbname(dbname,columns,indexcol='gid'):
+	string = "dbname=%s user=postgres password=secret" % (dbname)
+	conn = psycopg2.connect(string)
+	cursor = conn.cursor()
+	stringbools = []
+	count = 0
+	for column in columns:
+		if count == 0:
+			count = 1
+			query = "alter table %s add column %s text" % (dbname,column)	
+			stringbools.append(True)
+		else:
+			query = "alter table %s add column %s float" % (dbname,column)	
+			stringbools.append(False)
 		try:
-			current = collision_dict[str(row[0])]
-		except KeyError:
-			current = []
-		current.append(row[1])
-		collision_dict[str(row[0])] = current
-	
-	collision_dict2 = {}
-	for row in collision_dict.keys():
-		testval = collision_dict[str(row)]
-		if not len(testval) == 1:
-			collision_dict2[str(row)] = testval		
+			cursor.execute(query)
+		except:
+			conn = psycopg2.connect(string)
+			cursor = conn.cursor()
+	conn.commit()
+'''
 
-	return collision_dict2
+import mapkit as mk
+import pandas as pd
+import ult
+import numpy as np
+data = pd.read_csv('a.csv')
+ultindex = ult.read_json('nyc.json')
 
+
+data = ult.map_table(data,12,map_only=True)
+data = ult.line_index(data,ultindex)
+
+data = data[data['LINEID'].astype(str).str.len() > 0]
+data = mk.unique_groupby(data,'LINEID',small=True,hashfield=True)
+
+lines = mk.select_fromindexs('nyc_streets','gid',np.unique(data['LINEID'].astype(int)).tolist())
+lines = mk.make_color_mask(data,lines,'LINEID','gid')
+
+c = mk.make_config(lines,'lines',current=mk.make_config(data,'points'))
+
+mk.eval_config(c)
+
+
+
+#mk.cln()
+#mk.make_lines(lines,'lines.geojson',mask=True)
+#mk.make_points(data,'points.geojson',mask=True)
+#mk.a()
+# now we need to do this solve-
+segdistance = ult.read_json('segdist.json')
 
 '''
-args = bl.make_query_buffer('la_routes')
-data = pd.read_sql_query(*args)
-make_line_index(data)
 '''
-'''
-bl.clean_current()
-data2 = pd.read_csv('la_routes.csv')
 
-data = pd.read_csv('la_index.csv')
-multi_dict = make_multi_dict(data,'gid')
-geohashs = multi_dict.keys()
-b = bl.make_geohash_blocks(geohashs[:40000])
+ultindex = ult.read_json('new_index2.json')
 
 
-newlist = []
-for row in geohashs[:40000]:
-	vals = multi_dict[row]
-	newvals = []
-	for row in vals:
-		newvals.append(str(row))
-	newlist += newvals
-gids = np.unique(newlist)
-print len(gids)
-data2['BOOL'] = data2['gid'].astype(str).isin(gids)
-data2 = data2[data2['BOOL'] == True]
+data = pd.read_csv('total_philly.csv')
+data.columns = data.columns.values.tolist()[:-2] + ['LAT','LONG']
 
+data = ult.map_table(data,12,map_only=True)
+data = line_index(data,ultindex)
 
-bl.make_blocks(b,f='',bounds=True)
+data = data[data['LINEID'].astype(str).str.len() > 0]
+data = mk.unique_groupby(data,'LINEID',small=True,hashfield=True)
 
-bl.make_postgis_lines(data2,filename='lines.geojson',bounds=True)
-bl.a(bounds=True)
-#data2 = pd.read_csv('la_routes.csv')
-#line_df = make_line_index(data,'gid',csv=True,filename='la_index.csv')
-'''
-'''
-line_dictionary = make_lineindex_dict(data)
+lines = mk.get_database('philly')
 
-bl.clean_current()
+lines = mk.make_color_mask(data,lines,'LINEID','gid')
 
-extrema = {'n': 34.707659,'s': 33.246960,'w':-119.067929,'e':-116.991248}
-sampledata = bl.random_points_extrema(10000,extrema)
-
-# mapping geohashs to each point
-sampledata = bl.map_table(sampledata,8,map_only=True)
-
-
-
-s = time.time()
-sampledata = map_lineindex(sampledata,line_dictionary,'gid',8)
-print (time.time() - s) / float(len(sampledata))
-
-sampledata = sampledata[sampledata['gid'].str.len() > 0]
-uniquegids = np.unique(sampledata['gid'].astype(str)).tolist()
-
-data2['BOOL'] = data2['gid'].astype(str).isin(uniquegids)
-data2 = data2[data2['BOOL'] == True] 
-
-
-print 'done'
-
-bl.make_postgis_lines(data2,'lines.geojson')
-bl.make_points(sampledata,filename='points.geojson')
-bl.a()
-
+a = mk.make_config(data,'points')
+a = mk.make_config(lines,'lines',current=a)
+mk.eval_config(a)
 
 '''
+

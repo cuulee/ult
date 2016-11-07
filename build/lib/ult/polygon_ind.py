@@ -1,10 +1,11 @@
-import berrl as bl
 import pandas as pd
 import numpy as np
 import geohash
 import json
 import itertools
 import time
+from pipegeohash import map_table
+from geohash_logic import *
 
 # gets the extrema dictionary of the alignment df
 def get_extrema(df):
@@ -53,7 +54,7 @@ def get_inner_hashtable(df,maxsize):
 
 		# checking to see if values arent the same
 		if not ulcurrent == lrcurrent:
-			hashtable = bl.make_hashtable_range(ulcurrent,lrcurrent)
+			hashtable = make_hashtable_range(ulcurrent,lrcurrent)
 			shape = hashtable.shape
 			if shape[0] > 3 and shape[1] > 3:
 				ind = 1
@@ -68,12 +69,12 @@ def get_inner_hashtable(df,maxsize):
 		lrhash = lrhash[:maxsize]	
 
 	# gettin corners
-	ulhash = bl.get_corner(ulhash,'ul')
-	lrhash = bl.get_corner(lrhash,'lr')
+	ulhash = get_corner(ulhash,'ul')
+	lrhash = get_corner(lrhash,'lr')
 
 
 	# making the inner most hashtable needed
-	hashtable = bl.make_hashtable_range(ulhash,lrhash)
+	hashtable = make_hashtable_range(ulhash,lrhash)
 
 	return hashtable
 
@@ -83,7 +84,7 @@ def get_indexlist(geohashlist,hashtablevals):
 	geohashs = geohashlist
 	newlist = []
 	for row in geohashlist:
-		index = bl.get_index(hashtablevals,row)
+		index = get_index(hashtablevals,row)
 		newlist.append(index)
 	return newlist
 
@@ -481,7 +482,7 @@ def get_innerhashs_outsided(alignmentdf,maxsize,**kwargs):
 		next_level = []	
 
 	# getting indiceis table
-	indexdf = bl.make_indicies(innerhashtable.shape[1],innerhashtable.shape[0])
+	indexdf = make_indicies(innerhashtable.shape[1],innerhashtable.shape[0])
 
 	# stringifying indexlist
 	strindexlist = stringify_indicies(indexlist)
@@ -493,7 +494,7 @@ def get_innerhashs_outsided(alignmentdf,maxsize,**kwargs):
 # gets the inner df of geohashs
 def get_innerdf(data,maxsize,next_level):
 	# getting the indexdf
-	indexdf = bl.make_indicies(totalhashdf.shape[1],totalhashdf.shape[0])
+	indexdf = make_indicies(totalhashdf.shape[1],totalhashdf.shape[0])
 
 	# getting the outer indicies of the df
 	outerdf,next_level = get_innerhashs_outsided(data,maxsize,next_level=next_level)
@@ -533,7 +534,7 @@ def make_unique_down(uniquegeohashlist):
 # checks thep oints
 def check_third_dim(totalhashs,alignmentdf,innerbool):
 	# getting dataframe for points
-	data = bl.points_from_geohash(totalhashs)
+	data = points_from_geohash(totalhashs)
 
 	# creating intersect df for alignment table
 	itable = get_intersect_table(alignmentdf)
@@ -570,7 +571,7 @@ def assemble_outputs(unstackedinner,**kwargs):
 # an applymap on all df function
 def get_ind(geohash):
 	global hashtable
-	ind = bl.get_index(hashtable,geohash)
+	ind = get_index(hashtable,geohash)
 
 	return str(ind[0]) + ',' + str(ind[1])
 
@@ -634,10 +635,10 @@ def fill_indicies(data,innerhashtable,precision):
 	data = first_last(data)
 
 	# getting the geohash table back
-	data = bl.map_table(data,precision,map_only=True)
+	data = map_table(data,precision,map_only=True)
 
 	# getting the table with ind partial positons back
-	data = bl.ind_dec_points(data)
+	data = ind_dec_points(data)
 
 	global hashtable
 	hashtable = innerhashtable
@@ -746,7 +747,7 @@ def fill_geohashs(data,size):
 		oldrow = row
 
 	newlist = pd.DataFrame(newlist,columns=['LONG','LAT'])
-	newlist = bl.map_table(newlist,size,map_only=True)
+	newlist = map_table(newlist,size,map_only=True)
 	return newlist
 
 # makes a geospatial index / dict structure to easily aggregate areas and other polygons
@@ -876,7 +877,7 @@ def make_poly_lines(temp,aligns):
 	count = 0
 	for row in aligns:
 		newtemp = temp[temp['PART'] == str(row)]
-		bl.make_line(newtemp,filename=str(count)+'.geojson')
+		make_line(newtemp,filename=str(count)+'.geojson')
 		count += 1
 
 
@@ -921,7 +922,7 @@ def filter_lint_data3d(data,outeralignmentdf,rings):
 	# the outer ring
 	uniquegeohashs = b['total'].values.tolist()
 	expandedgeohashs = make_unique_down(uniquegeohashs)
-	potpoints = bl.points_from_geohash4(expandedgeohashs)
+	potpoints = points_from_geohash4(expandedgeohashs)
 
 	# creating intersect df for alignment table
 	itable = get_intersect_table(outeralignmentdf)
@@ -1011,13 +1012,13 @@ def make_ring_index(data):
 	return totals
 '''
 data = pd.read_csv('a.csv')
-bl.clean_current()
+clean_current()
 make_index(data,rings=True,areaname='aa',output=True)
 total = pd.read_csv('aa.csv')
 
 geohashs = total['total'].values.tolist()
-blocks = bl.make_geohash_blocks(geohashs)
-bl.make_blocks(blocks,filename='blocks.geojson')
+blocks = make_geohash_blocks(geohashs)
+make_blocks(blocks,filename='blocks.geojson')
 
-bl.a()
+a()
 '''
