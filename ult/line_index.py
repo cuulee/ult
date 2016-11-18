@@ -5,7 +5,6 @@ import geohash
 import time
 import json
 from pipegeohash import map_table,list2df,df2list
-import ult
 
 # gets the extrema dictionary of the alignment df
 def get_extrema(df):
