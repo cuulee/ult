@@ -70,7 +70,7 @@ def one_polygon_index(ghash):
 As you can see a geohash is sent in if the resultant is 'na' that means the geohash has areas lower in the hiearchy and to drill down another level until either an area is found or '' string is returned indicating no area within the ultindex corresponding to the given geohash. The global instances of variables are used instead of inputs because this function is mapped to a dataframe.
 
 ## Linestring 
-
+# Examples 
 # Polygon Usage Example
 
 ### Writing an h5 output
