@@ -1,4 +1,4 @@
-# Polygon Index / Linstring Index for fast Spatial aggregations
+# Polygon Index / Linestring Index for fast Spatial aggregations
 
 Geospatial problems are hard, especially when having to relatee a set of geometries (lines or polygons) to a substantial set of points, traditional methodologies essentially are infeasible over 100k + points without huge computing time lost. The solution is pretty simple remove geometry entirely from the operation. Like many things in CS this trades precomputation time of the indexs with the performence boost of using said indicies. 
 
@@ -28,7 +28,7 @@ An ultindex is a deepdish h5 file that contains the following data structures:
 This data structure can be directly sent into a localization algorithm and determine how the localization algorithm needs to be applied based on the metadata. It can also be used to easily output/style the data structure your aggregating against and output to a geojson file.
 
 # How is the ultindex created?
-Polygons
+## Polygons
 
 The polygon index creation process is complex but I'll try to be as explicit as possible about how its created. The make_polygon_index() accepts a dataframe thats structured in a very specific manner (see example) that accurately depicts the hierarchies within each area, I may create a repo that does this for all geospatial filetypes but currently I only have one for kmls here. Although it shouldn't be hard to replicate on geojson or any other file type.
 Essentially the output is df table that contains ring hiearchy about specific areas, nothing crazy, just strictly required to create an ultindex.
@@ -66,4 +66,7 @@ def one_polygon_index(ghash):
 ```
 
 As you can see a geohash is sent in if the resultant is 'na' that means the geohash has areas lower in the hiearchy and to drill down another level until either an area is found or '' string is returned indicating no area within the ultindex corresponding to the given geohash. The global instances of variables are used instead of inputs because this function is mapped to a dataframe.
+
+## Linestring 
+
 
