@@ -1,4 +1,4 @@
-#### Polygon Index / Linstring Index for fast Spatial aggregations
+# Polygon Index / Linstring Index for fast Spatial aggregations
 
 Geospatial problems are hard, especially when having to relatee a set of geometries (lines or polygons) to a substantial set of points, traditional methodologies essentially are infeasible over 100k + points without huge computing time lost. The solution is pretty simple remove geometry entirely from the operation. Like many things in CS this trades precomputation time of the indexs with the performence boost of using said indicies. 
 
@@ -18,7 +18,7 @@ While the geohashing process may be slowish this type of localization allows for
 
 In other words, assuming no memory constraints, any ultindex applied to a set of points should run about the same speed no matter how many polygons or lines is within the index. For example you could have an ultindex for the US states (50 polygon), and another one for zipcodes (35k polygons) and applying each of these indexs to a set of 1 millions points would return results in 1 second for each ultindex. You could also apply an index for road or other lines at basically the same speed. 
 
-#### What is an ultindex object?
+# What is an ultindex object?
 An ultindex is a deepdish h5 file that contains the following data structures:
 * alignmentdf - a pandas dataframe that was the input to make the ultindex this object can easily be output to geojson
 * ultindex - a flat dictionary that utilizes the geohashs hierarchy that is assembled slightly different depending on whether the index represents lines or polygons 
@@ -27,7 +27,7 @@ An ultindex is a deepdish h5 file that contains the following data structures:
 
 This data structure can be directly sent into a localization algorithm and determine how the localization algorithm needs to be applied based on the metadata. It can also be used to easily output/style the data structure your aggregating against and output to a geojson file.
 
-#### How is the ultindex created?
+# How is the ultindex created?
 Polygons
 
 The polygon index creation process is complex but I'll try to be as explicit as possible about how its created. The make_polygon_index() accepts a dataframe thats structured in a very specific manner (see example) that accurately depicts the hierarchies within each area, I may create a repo that does this for all geospatial filetypes but currently I only have one for kmls here. Although it shouldn't be hard to replicate on geojson or any other file type.
