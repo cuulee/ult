@@ -5,10 +5,12 @@ Geospatial problems are hard, especially when having to relatee a set of geometr
 
 ##### Pictures
 ![](https://cloud.githubusercontent.com/assets/10904982/20707851/3e5f16e4-b5fb-11e6-9d9e-40c0fd3d6fb8.png)
-![](https://cloud.githubusercontent.com/assets/10904982/20707857/406493e2-b5fb-11e6-94de-afa550c2f09c.gif)
 ![](https://cloud.githubusercontent.com/assets/10904982/20707852/3e6581f0-b5fb-11e6-9ba0-a19e68ba2b86.png)
 
 # What is ult?
+<p align="center">
+  <img src="https://cloud.githubusercontent.com/assets/10904982/20707857/406493e2-b5fb-11e6-94de-afa550c2f09c.gif" alt="Polygon Aggregation"/>
+</p>
 
 Ult solves traditional geospatial problems in a way that relies heavily on the fastest localization method that I'm aware of for 2-d objects: geohashing. 
 
