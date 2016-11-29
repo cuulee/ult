@@ -25,6 +25,57 @@ def get_extrema(df):
 
 	return extrema
 
+def create_range(val1,val2):
+	if val1 > val2:
+		minval = val2
+		maxval = val1
+	else:
+		minval = val1
+		maxval = val2
+
+	delta = (maxval - minval) / float(600)
+	newlist = [minval]
+	current = minval
+	for i in range(600):
+		current += delta
+		newlist.append(current)
+	newlist.append(maxval)
+	return newlist
+
+def make_geohashs(c1,c2,size):
+	lat1,long1 = geohash.decode(c1)
+
+	lat2,long2 = geohash.decode(c2)
+
+	lats = create_range(lat1,lat2)
+	longs = create_range(long1,long2)
+	total = []
+	for lat in lats:
+		total += zip([lat] * len(longs),longs)
+	ghashs = [geohash.encode(i[0],i[1],size) for i in total]
+	ghashs = np.unique(ghashs).tolist()
+	return ghashs
+def countfunc(x):
+	global count
+	global xs
+	global addxs
+	count += 1
+	addxs = [count] * len(x)
+
+	xs += addxs
+def make_lat_longs(ghashs):
+	global count
+	global xs
+	xs = []
+	count = -1
+	points = [geohash.decode(i) for i in ghashs]
+	df = pd.DataFrame(points,columns=['LAT','LONG'])
+	df['GEOHASH'] = ghashs
+
+	df = df.sort(['LONG'],ascending=[1])
+	df.groupby('LONG').apply(countfunc)
+	df['X'] = xs[:len(df)]
+	return df
 
 # getting the outermost precision in which blocks can fit within bounds
 def get_inner_hashtable(df,maxsize):
@@ -34,7 +85,6 @@ def get_inner_hashtable(df,maxsize):
 	# getting upper lefft and lowerright point
 	ul = [extrema['w'],extrema['n']]
 	lr = [extrema['e'],extrema['s']]
-
 	# getting geohash for ul and lr
 	# assuming 8 for the time being as abs min
 	ulhash = geohash.encode(ul[1],ul[0],12)
@@ -72,10 +122,9 @@ def get_inner_hashtable(df,maxsize):
 	ulhash = get_corner(ulhash,'ul')
 	lrhash = get_corner(lrhash,'lr')
 
-
 	# making the inner most hashtable needed
-	hashtable = make_hashtable_range(ulhash,lrhash)
-
+	ghashs = make_geohashs(ulhash,lrhash,maxsize)
+	hashtable = make_lat_longs(ghashs)
 	return hashtable
 
 # getting index list
@@ -215,6 +264,28 @@ def vert_line_test_exhaustive(data,itable,innerbool):
 
 	return pd.DataFrame(newlist[1:],columns=newlist[0])
 
+def make_bins_labels(dictthing):
+	newdict = {}
+	for name in sorted(dictthing.keys()):	
+		rawlats = dictthing[name]
+		bins = []
+		count = 0
+		rawlats = sorted(np.unique(rawlats).tolist())
+		count2 = 0
+		for row in rawlats[1:]:
+			if count == 0:
+				bins.append('in' + str(count2))
+				count = 1
+			elif count == 1:
+				bins.append('out' + str(count2))
+				count = 0
+			count2 += 1
+
+		if rawlats == []:
+			rawlats = [0]
+		newdict[name] = [rawlats,bins]
+	return newdict
+
 # solving alignment for 
 # the best method of solving all equations
 def solve_alignment(longs,coords):
@@ -240,24 +311,36 @@ def solve_alignment(longs,coords):
 						slope == 100000000
 					else:
 						slope = (lat - oldlat) / (long - oldlong)
-					lat = ((row - oldlong) * slope) + oldlat
+					lat1 = ((row - oldlong) * slope) + oldlat
 					try:
-						dictthing[str(current)].append(lat)
+						dictthing[current].append(lat1)
 					except:
-						dictthing[str(current)] = [lat]
+						dictthing[current] = [lat1]
 				#solves['LAT'] = ((solves['LONG'] - oldlong) * slope) + oldlat
 				#solves['X'] = solves.index + 1
 				current = current + 1
 
 		oldlong = long
 		oldlat = lat
+	dictthing = make_bins_labels(dictthing)
 	return dictthing
+
+def testfunc(data):
+	global solves
+	name = data.name
+	try: 
+		rawlats,labels = solves[name]
+	except:
+		rawlats,labels = [0],[]
+	return pd.cut(data,bins=rawlats,labels=labels)
 
 
 # gets each df associated with a specific x
 # as well as the solved itabledf for each x
-# returns a list of rows with [columndf,itablesolved]
-def prepare_columns(data,solves):
+# this is where the point in polygon solves are done entirely
+def prepare_columns(data,dictthing):
+	global solves
+	solves = dictthing
 	count = 0
 	for row in data.columns.values.tolist():
 		if 'lat' in str(row).lower():
@@ -268,56 +351,10 @@ def prepare_columns(data,solves):
 	count3 = 0
 	newlist = []
 	total = 0
-	xsize = len(np.unique(data['X']))
-	for name,temp in data.groupby('X'):
-		comparison = False
-
-		# getting temporary df that will be used for this column
-		#temp = data[data['X'] == row]
-		
-		# getting long value
-		'''
-		# getting lat outs on the itable
-		itabletemp = itable
-		itabletemp['LATOUT'] = ((long - itable['LONG1']) * itable['SLOPE']) + itable['LAT1']
-		itabletemp = itabletemp[(((itabletemp['LONG1'] > long)&(itabletemp['LONG2'] < long))|((itabletemp['LONG1'] < long)&(itabletemp['LONG2'] > long)))]
-		
-		'''
-		# logic for if the itable len is 2
-		# if this logic is correct hopefully we can just use a 
-		#comparison rather a dfslice
-		try:
-			rawlats = solves[str(name)]
-		except:
-			rawlats = [0]
-		bins = []
-		count = 0
-		rawlats = sorted(np.unique(rawlats).tolist())
-		count2 = 0
-		for row in rawlats[1:]:
-			if count == 0:
-				bins.append('in' + str(count2))
-				count = 1
-			elif count == 1:
-				bins.append('out' + str(count2))
-				count = 0
-			count2 += 1
-
-		if rawlats == []:
-			rawlats = [0]
-		temp['LABEL'] = pd.cut(temp['LAT'],bins=rawlats,labels=bins)
-		temp = temp[temp['LABEL'].str[:2] == 'in']
-		newlist += np.unique(temp['GEOHASH']).tolist()
-
-		if count3 == 25:
-			total += 25
-			count3 = 0
-			print '[%s / %s]' % (total,xsize)
-		count3 += 1
-
-
-	return newlist
-
+	xsize = len(np.unique(data['LONG']))
+	data['LABEL'] = data.groupby('X')['LAT'].apply(testfunc)
+	data = data[data['LABEL'].astype(str).str[:2] == 'in']
+	return data['GEOHASH']
 
 # mapping for expand geohashs
 def map_points(point):
@@ -345,90 +382,24 @@ def add_latlngs(data):
 		lats.append(lat)
 	data['LAT'] = lats
 	data['LONG'] = longs
-	'''
-	#data2 = data2.unstack(level=0).reset_index()
-	data3 = data2['GEOHASH'].map(map_points)
-	#print data3,len(data3),len(data2)
-	data2['STRING'] = data3
-	data3 = data3.str.split(',',expand=True)
-	data2[['LAT','LONG']] = data3.astype(float)
-	'''
 
 	return data
 
-
-
 # traverse columns rows for each unique value set in forward and reverse
-def traverse_columns_rows(indexdf,indexlist,innerdf,alignmentdf):
+def traverse_columns_rows(innerdf,alignmentdf):
 	global totallist
 	global innerhashdf
 	totallist = []
-	
-	# doing the column value iteration first
-	cols = indexdf.columns.values.tolist()
-	
-	# iterating through each column
-	for row in cols:
-		temprow = indexdf[row].isin(indexlist)
-		temprow = temprow[temprow == True]
-		indextemp = temprow.index.values.tolist()
-		if not indextemp == []:
-			first,last = min(indextemp),max(indextemp)
-
-			values1 = indexdf[row][:first]
-			values2 = indexdf[row][last:]
-			newrow = values1.values.tolist() + values2.values.tolist()
-
-		else:
-			newrow = indexdf[row].values.tolist()
-
-		totallist += newrow
-
-	# getting index values for iteration
-	inds = indexdf.index.values.tolist()
-
-	# iterating through each index value 
-	for row in inds:
-		temprow = indexdf.loc[row].isin(indexlist)
-		temprow = temprow[temprow == True]
-		indextemp = temprow.index.values.tolist()
-
-		if not indextemp == []:
-			first,last = min(indextemp),max(indextemp)
-
-			values1 = indexdf.loc[row][:first]
-			values2 = indexdf.loc[row][last:]
-			newrow = values1.values.tolist() + values2.values.tolist()
-
-		else:
-			newrow = indexdf.loc[row].values.tolist()
-
-		totallist += newrow
-
-
-	# getting all the uniques in the totallist 
-	totallist = np.unique(totallist).tolist()
-
-
-	# getting first querry of bools to then check if within polygon 
-	# via vertical line intersection test
-
-	newdf = indexdf.unstack(level=0).reset_index()
-	newdf['GEOHASH'] = innerdf.unstack(level=0).reset_index()[0]
-	newdf['BOOL'] = newdf[0].isin(totallist)
-	innergeohashs = newdf[newdf['BOOL'] == False]
-	innergeohashs['X'] = innergeohashs['level_0']
-	data = expand_geohashs(innergeohashs)
-
 	# vertical line intersection test
-	
-	solves = solve_alignment(np.unique(data['LONG']).tolist(),alignmentdf[['LONG','LAT']].values.tolist())
+	solves = solve_alignment(np.unique(innerdf['LONG']).tolist(),alignmentdf[['LONG','LAT']].values.tolist())
+	ids = sorted([int(i) for i in solves.keys()])
+
 	#itable.to_csv('itable.csv',index=False)
 	#innergeohashs.to_csv('innerhashs.csv',index=False)
 	# preparing columns for vert_line_test
-	data = prepare_columns(data,solves)
+	innerdf = prepare_columns(innerdf,solves)
 	# getting innergeohashs
-	innergeohashs = pd.DataFrame(data,columns=['GEOHASH'])
+	innergeohashs = pd.DataFrame(innerdf,columns=['GEOHASH'])
 	return innergeohashs
 
 def get_indexlist(filleddf,innerhashtable):
@@ -459,21 +430,15 @@ def get_innerhashs_outsided(alignmentdf,maxsize,**kwargs):
 		filleddf = fill_geohashs(alignmentdf,size)
 		alignsize = len(np.unique(filleddf['GEOHASH']))
 		#indexlist = get_indexlist(filleddf,innerhashtable)
+
 	#innerhashtable = get_inner_hashtable(alignmentdf,size)
-	
 	innerhashtable = get_inner_hashtable(alignmentdf,size)
-	indexlist = get_indexlist(filleddf,innerhashtable)
 
 	# getting index list if maxsize is already givven
 	if not maxsize == False:
 		innerhashtable = get_inner_hashtable(alignmentdf,maxsize)
 		filleddf = fill_geohashs(alignmentdf,maxsize)
-		indexlist = get_indexlist(filleddf,innerhashtable)
 	
-	# getting innerhash tables size
-	corner = innerhashtable.loc[0][0]
-	size = len(corner)
-
 	if next_level == True:
 		uniquegeohashs = np.unique(filleddf['GEOHASH']).tolist()
 		totalhashs = make_unique_down(uniquegeohashs)
@@ -481,15 +446,8 @@ def get_innerhashs_outsided(alignmentdf,maxsize,**kwargs):
 	else:
 		next_level = []	
 
-	# getting indiceis table
-	indexdf = make_indicies(innerhashtable.shape[1],innerhashtable.shape[0])
-
-	# stringifying indexlist
-	strindexlist = stringify_indicies(indexlist)
-
 	#df = add_latlngs(df)
-
-	return traverse_columns_rows(indexdf,strindexlist,innerhashtable,alignmentdf),next_level
+	return traverse_columns_rows(innerhashtable,alignmentdf),next_level
 
 # gets the inner df of geohashs
 def get_innerdf(data,maxsize,next_level):
@@ -557,15 +515,19 @@ def assemble_outputs(unstackedinner,**kwargs):
 
 	# creating lower column and summing totals
 	unstackedinner['GEOHASH1'] = unstackedinner['GEOHASH'].str[:-1]
-	unstackedinner['COUNT'] = 1
-	unstackedinner = unstackedinner.groupby(['GEOHASH1'])
+	unstackedinner1 = unstackedinner
+	unstackedinner = unstackedinner.groupby(['GEOHASH1']).count().reset_index()
+	uniques = unstackedinner[unstackedinner['GEOHASH'] == 32]['GEOHASH1'].values.tolist()
+	unstackedinner1['BOOL'] = unstackedinner1['GEOHASH1'].isin(uniques)
+	
+	'''
 	for name,group in unstackedinner:
 		if len(group) == 32:
 			total.append(name)
 		else:
 			total += group['GEOHASH'].values.tolist()
-
-	total = pd.DataFrame(total,columns=['total'])
+	'''
+	total = pd.DataFrame(uniques + unstackedinner1[unstackedinner1['BOOL'] == False]['GEOHASH'].values.tolist(),columns=['total'])
 	return total
 # converts indicies to string representation
 # an applymap on all df function
@@ -738,8 +700,8 @@ def fill_geohashs(data,size):
 			count = 1
 		else:
 			dist = distance(oldrow,row)
-			if dist > hashsize / 10.0:
-				number = (dist / hashsize) * 10.0
+			if dist > hashsize / 5.0:
+				number = (dist / hashsize) * 5.0
 				number = int(number)
 				newlist += generate_points(number,oldrow,row)[1:]
 			else:
@@ -987,7 +949,6 @@ def make_single_ring(outer_ring,inner_rings,**kwargs):
 	return total
 
 
-
 # iterates through each unique ring series
 # selecting part of the alignment frame for each
 def make_ring_index(data):
@@ -1000,6 +961,7 @@ def make_ring_index(data):
 	count = 0
 	totals = []
 	for row in uniques:
+		s = time.time()
 		temp = data[data['RING'] == str(row)]
 		uniquealigns = np.unique(temp['PART'])
 		outer_ring,inner_rings = get_outer_inner(temp,uniquealigns)
@@ -1008,17 +970,8 @@ def make_ring_index(data):
 		totals.append(total)
 
 		count += 1
+		if not uniques == 1:
+			print 'Rings within Area: [%s/%s] & Ring Time: %s' % (count,len(uniques),time.time()-s)
 	totals = pd.concat(totals)
 	return totals
-'''
-data = pd.read_csv('a.csv')
-clean_current()
-make_index(data,rings=True,areaname='aa',output=True)
-total = pd.read_csv('aa.csv')
 
-geohashs = total['total'].values.tolist()
-blocks = make_geohash_blocks(geohashs)
-make_blocks(blocks,filename='blocks.geojson')
-
-a()
-'''

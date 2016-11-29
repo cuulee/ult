@@ -31,7 +31,7 @@ ULT         0.095100
 dtype: float64
 256.996006301x 100000 points
 ```
-**Its also worth noting that this is a one polygon comparison ult can have as many polygons within its index as it needs and see little hit in performence, while I'm not sure how you would do with out a hard for loop through every geometry in shapely**
+**Its also worth noting that this is a one polygon comparison ult can have as many polygons within its index as it needs and see little hit in performence, while I'm not sure how you would do this with out a hard for loop through every geometry in shapely**
 
 ### How it works / How to Use
 #### Polygons 
@@ -42,6 +42,9 @@ Building an index isn't necessarily cheap or quick computationally speaking. Bui
 For huge indexs you may want to utilize multi processesing in order to create the csv files used to create an index faster, I've added this functionality as well using the sc=sc kwarg in which you pass in a spark context and splits the remaining areas up into 8 supprocesses. 
 
 While the indexs created aren't tiny by any means there also not huge, I've attempted to be as conservative as possible in making the indexs as small as possible and it works pretty well, a [states_index.json](https://raw.githubusercontent.com/murphy214/ult/master/states_index.json) is about 1.2 mb which isn't terrible and probably smaller than the amount of memory for every alignment in a list. 
+
+
+**NOTE: Some of what I've stated above and the examples below may be deprecated I've changed a lot of the outputs to write a more dynamic h5 file and updated a ton of other stuff.**
 
 Below is a small sample of the code to build and code to use these indexs:
 #### Building 

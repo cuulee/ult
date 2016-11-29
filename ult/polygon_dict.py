@@ -216,10 +216,30 @@ def one_polygon_index(ghash):
 	global minsize
 	global maxsize
 	global ultindex
+	global areamask
 
 	current = minsize
 	while current < maxsize:
 		output = ultindex.get(ghash[:current],'')
+		# logic for continuing or not
+		if output == 'na':
+			current += 1
+		elif output == '':
+			return ''
+		else:
+			return areamask.get(output,'')
+
+# maps one geohash to what it needs to be
+def one_polygon_index_regions(ghash):
+	global minsize
+	global maxsize
+	global ultindex
+	global areamask
+
+	current = minsize
+	while current < maxsize:
+		currentindex = ultindex.get(ghash[:2],{})
+		output = currentindex.get(ghash[:current],'')
 		#print output,ghash,current,ghash[:current]
 		# logic for continuing or not
 		if output == 'na':
@@ -227,8 +247,7 @@ def one_polygon_index(ghash):
 		elif output == '':
 			return ''
 		else:
-			return output
-
+			return areamask.get(output,'')
 
 # maps a geohash to a given area index
 # will again use global dict instead of function input
@@ -236,13 +255,18 @@ def area_index(data,index):
 	global minsize
 	global maxsize
 	global ultindex
-	ultindex = index
-	minsize = ultindex['min']
-	maxsize = ultindex['max']
+	global areamask
+	ultindex = index['ultindex']
+	areamask = index['areamask']
+	minsize = index['metadata']['minsize']
+	maxsize = index['metadata']['maxsize']
+	output_type = index['metadata']['output_type']
 
 	# mapping all geohashs to areas
-	data['AREA'] = data['GEOHASH'].map(one_polygon_index)
-
+	if output_type == 'single':
+		data['AREA'] = data['GEOHASH'].map(one_polygon_index)
+	elif output_type == 'regions':
+		data['AREA'] = data['GEOHASH'].map(one_polygon_index_regions)
 	return data
 
 
@@ -316,7 +340,7 @@ def gener_vals(lats,lngs,line_index,seg_index):
 def make_test_block(ultindex,number):
 	from mapkit import unique_groupby
 	#indexdict = read_json('states_ind.json')
-	extrema = {'n': 50.449779,'s': 20.565774,'e':-70.493017,'w':-130.578836}
+	extrema = {'n': 80.449779,'s': 10.565774,'e':-60.493017,'w':-150.578836}
 	data = random_points_extrema(number,extrema)
 	data = map_table(data,12,map_only=True)
 	s = time.time()
@@ -361,15 +385,22 @@ def set_wrapper(arg):
 
 # creates a bounds dataframe taht can be used to display
 # boundries, input is the total boundry df
-def stringify_bounds(data,m2):
+def stringify_bounds(data):
 	newlist = []
 	for name,group in data.groupby(['AREA','PART']):
 		group = group.reset_index()
 		coords = group[['LONG','LAT']].values.tolist()
 		coords = stringify(coords)
-		newlist.append([m2[str(name[0])],name[1],coords])
+		newlist.append([name[0],name[1],coords])
 	newlist = pd.DataFrame(newlist,columns=['AREA','PART','coords'])
 	return newlist
+
+# creates metadata dictionary for polygon h5 outputs
+# type is the output type
+# min and max is the size of polygon steps
+# size is the size of areamask
+def make_meta_polygon(type,min,max,size):
+	return {'type':'polygons','output_type':type,'minsize':min,'maxsize':max,'size':size}
 
 
 def make_files(dflist):
@@ -397,21 +428,17 @@ def make_h5_output(filename,**kwargs):
 		completed = progress.keys()
 		newcompleted = []
 
-		print 'read'
 		# getting alignment df input into make_set
 		alignment = progress['/initial']
-		print 'here1'
 		areamask,m2 = construct_area_mask(np.unique(alignment['AREA'].astype(str)).tolist())
 
 
 		# getting all completed dfs
-		print 'here2'
 		for row in completed:
 			if not row == '/initial' and not row == '/areamask':
 				newcompleted.append(row)
 		
 		dflist = []
-		print 'hre'
 		for row in newcompleted:
 			if output == 'single':
 				dflist.append(progress[str(row)])
@@ -422,7 +449,7 @@ def make_h5_output(filename,**kwargs):
 	# or completion should be used with smaller indexs
 	if output == 'single':
 		# stringify bounds
-		bounds = stringify_bounds(alignment,m2)
+		bounds = stringify_bounds(alignment)
 
 		# concatenating all the dataframes
 		dflist = pd.concat(dflist)
@@ -443,16 +470,19 @@ def make_h5_output(filename,**kwargs):
 		dflist = dflist['AREA'].to_dict()
 		total2 = total2['AREA'].to_dict()
 
+		# making total dict
 		totaldict = merge_dicts(*[total2,dflist])
 
-		totaldict['min'] = minsize
-		totaldict['max'] = maxsize
-
-		d = {'ultindex':totaldict,'alignmentdf':bounds,'areamask':areamask}
+		# making meta dictioanry
+		metadict = make_meta_polygon(output,minsize,maxsize,len(areamask))
+		
+		d = {'ultindex':totaldict,
+			'alignmentdf':bounds,
+			'areamask':areamask,
+			'metadata':metadict}
 
 		dd.io.save(filename,d)
 
-		print 'Wrote output %s with ultindex,bounds, and areamask.' 
 
 
 	if output == 'regions':
@@ -468,7 +498,6 @@ def make_h5_output(filename,**kwargs):
 			maxsize = row['total'].str.len().max()
 			mins.append(minsize)
 			maxs.append(maxsize)
-			print row
 			row['G1'] = row['total'].str[:2]
 			for name,group in row.groupby('G1'):
 				try:
@@ -479,12 +508,13 @@ def make_h5_output(filename,**kwargs):
 		size = len(newdict.keys())
 		count = 0
 		ultindex = {}
+		minsize = min(mins)
+		maxsize = max(maxs)
 		for i in newdict.keys():
 			count += 1
 			df = pd.concat(newdict[i])
-			print 'first concat'
 			df = df[['total','AREA']]
-			uniques,b,c = reduce_to_min(df)
+			uniques,b,c = reduce_to_min(df,minsize=minsize)
 			df1 = pd.DataFrame(uniques,columns=['total'])
 			df1['AREA'] = 'na'
 			df = pd.concat([df1,df])
@@ -499,21 +529,27 @@ def make_h5_output(filename,**kwargs):
 			#df.to_csv(str(i)+'.csv',index=False)
 			print '[%s / %s]' % (count,size)
 		
-		# adding min and max to ultindex
-		ultindex['min'] = min(mins)
-		ultindex['max'] = max(maxs)
 
-		d = {'ultindex':ultindex,'alignmentdf':bounds,'areamask':areamask}
+
+		# making meta dictioanry
+		metadict = make_meta_polygon(output,minsize,maxsize,len(areamask))
+		
+		d = {'ultindex':ultindex,
+			'alignmentdf':bounds,
+			'areamask':areamask,
+			'metadata':metadict}
 
 		dd.io.save(filename,d)
 
-		print 'Wrote output %s with ultindex,bounds, and areamask.' 
 
 
 def make_wrapper(args):
-	data,areamask2 = args
-	s = time.time()
+	data,areamask2,process = args
+	totals = []
 	count = 0
+	totalcount = 0
+	current = 0
+	size = len(np.unique(data['AREA']))
 	for name,group in data.groupby('AREA'):
 		# making ring index for each alignment
 		s = time.time()
@@ -524,11 +560,16 @@ def make_wrapper(args):
 
 		minval = total['total'].str.len().min()
 		maxval = total['total'].str.len().min()
-
-		count += 1
-		print count		
-		with pd.HDFStore('progress.h5') as progress:
-			progress[str(name)] = total
+		totals.append(total)
+		totalcount += 1
+		current += 1
+		if current == 20:
+			current = 0
+			totals = pd.concat(totals)
+			with pd.HDFStore('progress.h5') as progress:
+				progress[str(name)] = totals
+			totals = []
+		print '[%s/%s] for Process:%s in %s' % (totalcount,size,process,time.time() - s)		
 	return []
 
 
@@ -559,7 +600,6 @@ def make_set(data,field,**kwargs):
 			completed = progress.keys()
 			startcount = len(completed)
 			completed = [row[1:] for row in completed]
-			print len(completed)
 			data['BOOL'] = data[field].isin(completed)
 			data = data[data['BOOL'] == False]
 	except:
@@ -576,8 +616,10 @@ def make_set(data,field,**kwargs):
 	if not sc == False:
 		partialargs = np.array_split(data,8)
 		newlist = []
+		processcount = 0
 		for row in partialargs:
-			newlist.append([row,areamask2])
+			newlist.append([row,areamask2,processcount])
+			processcount += 1
 		args = newlist
 		instance = sc.parallelize(args)
 		instance.map(make_wrapper).collect()
@@ -641,7 +683,6 @@ def make_set(data,field,**kwargs):
 				maxtotal = maxval
 			totaltime += time.time() - s
 			count += 1
-			print total
 			avg = round(totaltime / float(count - startcount),2)
 			print 'Areas Complete: [%s / %s], AVGTIME: %s s' % (count,sizeareas,avg)
 			
@@ -650,6 +691,31 @@ def make_set(data,field,**kwargs):
 
 
 	return areamask1,mintotal,maxtotal
+
+
+# makes a polygon index from a dataframe containing typical 
+# polygon layout
+# data - is the dataframe
+# filename - is output h5 file that will be made
+def make_polygon_index(data,filename,**kwargs):
+	output = 'single'
+	sc = False
+	for key,value in kwargs.iteritems():
+		if key == 'output':
+			output = value
+		if key == 'sc':
+			sc = value
+	make_set(data,'AREA',sc=sc)
+	print 'Made progress h5 file now constructing ouput file.'
+	make_h5_output(filename,output=output)
+	print 'Made output h5 file containing datastructures:'
+	print '\t- alignmentdf (type: pd.DataFrame)'
+	print '\t- areamask (type: dict)'
+	print '\t- ultindex (type: dict)'
+	print '\t- metadata (type: dict)'
+
+	os.remove('progress.h5')
+	print 'Removed progress.h5 from directory'
 
 
 # collecting geohashs
@@ -662,6 +728,53 @@ def collecthash(new,prefix,list):
 
 	return list
 
+# creates a blocks dataframe from the ultindex
+def make_blocks_polygons(index):
+	# getting areamask
+	areamask = index['areamask']
+	
+	# creating dataframe
+	data = pd.DataFrame(index['ultindex'].items(),columns=['GEOHASH','AREA'])
+	
+	# filtering out upper hiearcharchy
+	data = data[data.AREA != 'na']
+	
+	# applying area mask to get the areas
+	data['AREA'] = data['AREA'].map(lambda x:areamask[x])
+	return data
+
+
+# creating the lines 
+def make_blocks_lines(index):
+	areamask = index['areamask']
+	data = index['alignmentdf']
+	return data
+
+# creates a configuration for all types
+def make_all_types_polygons(pointdata,index):
+	from mapkit import make_config
+	# getting the area,colorkey dict
+	colordict = pointdata.set_index('AREA')['COLORKEY'].to_dict()
+
+	# getting lines and blocks dataframes
+	lines = make_blocks_lines(index)
+	blocks = make_blocks_polygons(index)
+
+	# filtering lines and blocks
+	lines['BOOL'] = lines['AREA'].isin(colordict.keys())
+	blocks['BOOL'] = blocks['AREA'].isin(colordict.keys())
+	lines = lines[lines.BOOL == True]
+	blocks = blocks[blocks.BOOL == True]
+
+	# adding colorkey to lines and blocks
+	lines['COLORKEY'] = lines['AREA'].map(lambda x:colordict[x])
+	blocks['COLORKEY'] = blocks['AREA'].map(lambda x:colordict[x])
+
+	a = make_config(pointdata,'points')
+	a = make_config(lines,'lines',current=a)
+	a = make_config(blocks,'blocks',current=a)
+	return a
+
 # getting all geohashs 
 # returns a dataframe of all areas and each geohashs associated with areas
 def get_geohashs(b):
@@ -673,7 +786,9 @@ def get_geohashs(b):
 			totallist += partlist
 	return pd.DataFrame(totallist,columns=['GEOHASH','AREA'])
 
-
+# reads deepdish dd h5 file for ultindex outputs
+def read_h5(filename):
+	return dd.io.load(filename)
 
 def make_json(dictionary,filename):
 	with open(filename,'wb') as f:

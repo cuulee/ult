@@ -1,0 +1,15 @@
+def make_all_types_polygons(pointdata,index):
+    from mapkit import make_config
+    colordict = pointdata.set_index('AREA')['COLORKEY'].to_dict()
+    lines = ult.make_blocks_lines(index)
+    blocks = ult.make_blocks_polygons(index)
+    lines['BOOL'] = lines['AREA'].isin(colordict.keys())
+    blocks['BOOL'] = blocks['AREA'].isin(colordict.keys())
+    lines = lines[lines.BOOL == True]
+    blocks = blocks[blocks.BOOL == True]
+    lines['COLORKEY'] = lines['AREA'].map(lambda x:colordict[x])
+    blocks['COLORKEY'] = blocks['AREA'].map(lambda x:colordict[x])
+    a = make_config(pointdata,'points')
+    a = make_config(lines,'lines',current=a)
+    a = make_config(blocks,'blocks',current=a)
+    return a
