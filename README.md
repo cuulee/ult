@@ -71,4 +71,120 @@ As you can see a geohash is sent in if the resultant is 'na' that means the geoh
 
 ## Linestring 
 
+# Polygon Usage Example
+
+### Writing an h5 output
+The following example uses the 'states_total.csv' which can be found in this repo. 
+
+```python
+import pandas as pd
+import ult
+
+# reading in the example states csv file
+# with the correct hiearchy syntax
+data = ult.read_csv('states_total.csv')
+
+# creating the ultindex h5 file 
+ult.make_polygon_index(data,'states.h5')
+```
+
+### Relating the output Ultindex to points
+
+The next example takes the h5 file created and a csv file (random_points.csv) of dataframe containing randomly generated points (lat/long) and maps it to the created index.
+
+```python
+import ult
+import pandas as pd
+
+# reading in random point csv file
+# this df has two fields: [LAT and LONG]
+data = pd.read_csv('random_points.csv')
+
+# adding the geohash column to the dataframe
+# the precision of the geohash is consequential to performence
+# in this case were using the precision of 12 
+# in reality it doesnt matter as long as your precison
+# is greater then or equal to the maxsize of the index
+data = ult.map_table(data,12,map_only=True)
+
+# reading the h5 file into memory
+ultindex = ult.read_h5('states.h5')
+
+# now mapping the the ultindex using the information 
+# contained in the data dataframe
+data = ult.area_index(data,ultindex)
+
+# slicing only the point areas that were found
+data = data[data['AREA'].astype(str).str.len() > 0]
+
+print data
+'''
+OUTPUT:
+              LAT        LONG       GEOHASH            AREA
+0       48.089478  -93.750921  cbt3ddktt0qk       Minnesota
+1       41.379246 -102.953335  9xqg3hzet6te        Nebraska
+9       38.548906 -122.784367  9qbemcx5suuk      California
+13      36.818091 -100.050876  9y8c7q90vtef        Oklahoma
+20      37.413120  -94.186330  9ythbdze5rn4        Missouri
+21      31.053591  -97.402089  9vd8xt1uqbf5           Texas
+24      38.206359  -93.041011  9yvc6g385m9c        Missouri
+25      45.455005  -94.609907  cbhdx4g4t7hh       Minnesota
+28      46.870968 -117.590168  c2k6sht7nmxe      Washington
+31      38.144311 -117.411059  9qu8bpzysnbu          Nevada
+34      26.836894  -99.089117  9uc89jt80pxk           Texas
+35      41.297582 -108.241780  9x74bvuxzer1         Wyoming
+37      48.329405 -109.694491  c89fzy4gjn5k         Montana
+39      33.392247  -96.339963  9vgmzwz7unj7           Texas
+40      46.189429 -110.379100  c81wb282ut97         Montana
+41      41.284224  -92.552133  9zq4vgtd4cpx            Iowa
+43      33.941764 -105.590139  9whcj4zt57mw      New Mexico
+45      30.025959  -82.955948  djm4b613fk3y         Florida
+51      44.436350 -108.419526  9xfuuc7k9bn3         Wyoming
+52      38.544225 -107.390838  9wgek2b2kh71        Colorado
+53      37.161598  -81.516280  dnw53j19uzzy        Virginia
+54      45.059698 -105.257990  c8j0kfc7z0d3         Montana
+56      35.134067  -78.141553  dq0rvggncbg5  North Carolina
+58      43.789761  -99.213492  9zc3n7dvy546    South Dakota
+62      33.539471  -89.381152  djbqy1dts4w1     Mississippi
+67      43.246302  -92.687529  9zwn4bepbp14            Iowa
+69      45.177513 -116.541798  c2j1h02f56bb           Idaho
+74      45.228663  -99.014039  cb196cshj9v4    South Dakota
+80      43.500666 -110.228819  9x9x7xjcdrg5         Wyoming
+81      40.523553  -83.452706  dphwscpdg1b5            Ohio
+...           ...         ...           ...             ...
+499947  35.421860  -81.665577  dnmct8kgq1k4  North Carolina
+499952  28.083702  -98.556564  9uczv23r3te0           Texas
+499957  38.334317  -77.553863  dqbf54x18486        Virginia
+499958  39.703135  -80.271515  dpncv7spd0uh   West Virginia
+499961  31.590770  -91.625442  9vwgenbms6q3       Louisiana
+499964  33.090380  -88.253559  djchpxztrjbu         Alabama
+499965  29.758773  -95.962625  9v7c236jkv2d           Texas
+499966  37.459543 -117.099734  9qstp769dkvu          Nevada
+499968  42.820795 -108.558834  9xdg9emc5ydr         Wyoming
+499969  45.995796  -68.105952  f2ptdjqbbmch           Maine
+499974  37.802177  -96.779052  9yepj9xtsss8          Kansas
+499976  46.637673 -104.575035  c8m9k64u1h3f         Montana
+499977  39.991365 -109.969346  9x1g984y8db8            Utah
+499978  41.834374 -108.453019  9x6vupdyvkx7         Wyoming
+499979  30.095319  -85.659142  dj754y8vvmcz         Florida
+499980  31.872310 -102.342257  9txjr4htst4j           Texas
+499983  46.408355  -90.466860  cbr8j2kh327e       Wisconsin
+499984  40.862529 -115.929773  9rm83yy92rrv          Nevada
+499985  41.278137  -92.395107  9zq6c6rytfw2            Iowa
+499987  36.780333  -76.100634  dq9chr9hywyn        Virginia
+499988  29.312756  -97.970709  9v4qf85zjj8y           Texas
+499989  33.345653 -100.084029  9vbvdw3h905p           Texas
+499990  45.729267 -106.524539  c8hhpuz0q34u         Montana
+499991  34.240690 -100.781937  9y06f9kf6xjp           Texas
+499992  30.274349 -102.445957  9trhhz30u5wn           Texas
+499993  34.624113 -109.412432  9w4hyr0k1d99         Arizona
+499994  40.431791  -80.862371  dpnqpbmu60jt            Ohio
+499996  46.079738 -120.169030  c24w1kx9ftsq      Washington
+499997  41.527151  -86.241824  dp6sjxb95vgn         Indiana
+499999  35.673768 -120.603379  9q64zw5qc86b      California
+
+[215820 rows x 4 columns]
+'''
+```
+
 
