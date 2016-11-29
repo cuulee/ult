@@ -5,12 +5,9 @@ import geohash
 import time
 import json
 from pipegeohash import map_table,list2df,df2list
-<<<<<<< HEAD
 import deepdish as dd
 from polygon_dict import merge_dicts
 from geohash_logic import *
-=======
->>>>>>> origin/master
 
 # gets the extrema dictionary of the alignment df
 def get_extrema(df):
