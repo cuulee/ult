@@ -8,7 +8,7 @@ Geospatial problems are hard, especially when having to relatee a set of geometr
 ![](https://cloud.githubusercontent.com/assets/10904982/19921150/0395f56c-a0b3-11e6-93fe-00166d12e08f.png)
 ![](https://cloud.githubusercontent.com/assets/10904982/19921175/19c1e990-a0b3-11e6-8284-3563b183ac17.png)
 
-What is ult?
+# What is ult?
 
 Ult solves traditional geospatial problems in a way that relies heavily on the fastest localization method that I'm aware of for 2-d objects: geohashing. 
 
