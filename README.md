@@ -261,4 +261,10 @@ OUTPUT:
 '''
 ```
 
+# Usage Information 
 
+Currently lines may accept st_asekwt as a string field in a dataframe and a string representation of coords that would in geojson alignment as a coords field, it will support more alignment types layer but these are the way I treat alignments personally, specially the string geojson is awesome for nlgeojson.
+
+Spark parallelization can be used in the make_polygon_index algorithm to do enable a spark split simply pass in a sql context sc, into sc as a kwarg (sc=sc) and splits on the remaining progress or entire table will be split evenly. 
+
+Outputs for area_index can take two forms one: a single method (default that compiles all subdfs into one dict, 'regions', based on the level 2 precision of a geohash splits each dict into sub dictionaries based on this. This is useful if your running into memory walls when mapping your output.
