@@ -29,6 +29,61 @@ An ultindex is a deepdish h5 file that contains the following data structures:
 
 This data structure can be directly sent into a localization algorithm and determine how the localization algorithm needs to be applied based on the metadata. It can also be used to easily output/style the data structure your aggregating against and output to a geojson file.
 
+
+# Benchmarks / Reasons to Use
+
+### Shapely Comparisons
+
+This comparison was all 50 US states vs one in shapely, I don't how to use collections methods on geometry collections in shapely and I don't feel like learning how to make a collection in the first place and I doubut it would get faster so I just did 1.
+
+Its worth nothing shapely would just iterate through each polygon doing ray-casting SO IT WOULD GET SLOWER ANYWAY.
+
+The index also contains every single area given instead of what would be a point comparison against 50 diffent geometries in a typical geometric comparison. Benchmarks in comparison against shapely:
+
+```
+SHAPELY | 0.027808
+ULT | 0.001157
+dtype: float64
+24.0287388881x 100 points
+SHAPELY    2.367857
+ULT        0.009810
+dtype: float64
+241.381324357x 10000 points
+SHAPELY    24.440322
+ULT         0.095100
+dtype: float64
+256.996006301x 100000 points
+```
+
+### Random Benchmarks on some Example Philly Data
+
+This data was actually collected from a philly bus API so it would be a real world test case. I didn't have any modules that I know of that I could really benchmark against this. (sorry)
+
+```
+1.92039895058 seconds to add to dataframe
+0.608725070953 to map the points to geohashs
+597722 points 
+```
+
+The difference here occurs from the fact a dataframe to be created to add the columns to the input table as were return 3 fields per one mapped field.
+
+### Reasons to use ult
+
+Ult has several advantages I think makes it worth looking at.
+
+1) Its fast, faster than anything I've seen at least
+2) Its relatively simple in implementation but yields an index that still represents areas or lines.
+3) Lines output being the lineid, the distance along the line, as well as the percentage along the line is something I've never seen done on an algorithm like this.
+4) higher level polygon indexs can easily be related to the lowest smallest area hiearchy so that area_index can yield 6 different polygon indexs from the hierarchy that can easily be created. 
+
+To create a hiearchy simply apply your lower geohash hiearchy ultindex to your next step up index until you get to the end. This actually has an added benefit I didn't even thing of, many libraries that utitilize ray casting and then represent hiearchy to drill down find themselves in situations where they have to clip alot of areas to complete there hiearchy correctly. This operation in of itsself is super complex annoying, my indexs complete negate needing to do this by mapping the previous index to the next one up. 
+In other words I go completely backwards from traditional ray-casting hierachy algs but can still yield every single output corresponding to all the higher level geohashs at that lowest layer hiearchy. I guess hiearchy isn't something thats required like in other algs, it just happens.
+
+That being said I would be remiss if I didn't tell you the biggest problem with ult currently, large dictionary objects on an 8 gb macbook pro. While these algs. are sort of intended for servers where memory constrictions aren't really a thing, I still exceed my memory by the time I get to something as granular as zipcodes.
+
+I'm currently experimenting with cache systems to cache part of the index without reading in the entire thing. Things like extrema slicing could remove a large majority of the areas if your only workign in a certain locality.
+
+
 # How is the ultindex created?
 ## Polygons
 
