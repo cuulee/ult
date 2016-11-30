@@ -1,5 +1,7 @@
 # Polygon Index / Linestring Index for fast Spatial aggregations
 
+### Relating points to polygons and points to lines at 1 million points / second.
+
 Geospatial problems are hard, especially when having to relatee a set of geometries (lines or polygons) to a substantial set of points, traditional methodologies essentially are infeasible over 100k + points without huge computing time lost. The solution is pretty simple remove geometry entirely from the operation. Like many things in CS this trades precomputation time of the indexs with the performence boost of using said indicies. 
 
 
