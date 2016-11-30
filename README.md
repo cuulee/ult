@@ -82,7 +82,7 @@ import ult
 
 # reading in the example states csv file
 # with the correct hiearchy syntax
-data = ult.read_csv('states_total.csv')
+data = pd.read_csv('states_total.csv')
 
 # creating the ultindex h5 file 
 ult.make_polygon_index(data,'states.h5')
