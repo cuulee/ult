@@ -78,6 +78,9 @@ Ult has several advantages I think makes it worth looking at.
 3. Lines output being the lineid, the distance along the line, as well as the percentage along the line is something I've never seen done on an algorithm like this.
 4. higher level polygon indexs can easily be related to the lowest smallest area hiearchy so that area_index can yield 6 different polygon indexs from the hierarchy that can easily be created. 
 
+[Video of me creating a polygon hierachy](https://www.youtube.com/watch?v=_PdABXMAO3w&feature=youtu.be)
+
+
 To create a hiearchy simply apply your lower geohash hiearchy ultindex to your next step up index until you get to the end. This actually has an added benefit I didn't even thing of, many libraries that utitilize ray casting and then represent hiearchy to drill down find themselves in situations where they have to clip alot of areas to complete there hiearchy correctly. This operation in of itsself is super complex annoying, my indexs complete negate needing to do this by mapping the previous index to the next one up. 
 In other words I go completely backwards from traditional ray-casting hierachy algs but can still yield every single output corresponding to all the higher level geohashs at that lowest layer hiearchy. I guess hiearchy isn't something thats required like in other algs, it just happens.
 
