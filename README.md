@@ -48,7 +48,7 @@ Total is the total time it took to make the index and write it out to the output
 
 To map a table with lat / lng fields simply use the function ult.map_table(data,12,map_only =True) and it will take the lat / lng fields and hash each point on the table adding the column for you as well. 
 
-single | single_values | regions | regions_values
+single | single_values (s) | regions | regions_values (s)
  --- | --- | --- | ---
 "make_set(""single.h5"")" | 17.6731444597 | "make_set(""regions.h5"")" | 109.75850451
 "make_h5_output((""single.h5"")" | 0.542840123177 | "make_h5_output((""regions.h5"")" | 4.00887596607
