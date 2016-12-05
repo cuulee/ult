@@ -23,16 +23,40 @@ While the geohashing process may be slowish this type of localization allows for
 In other words, assuming no memory constraints, any ultindex applied to a set of points should run about the same speed no matter how many polygons or lines is within the index. For example you could have an ultindex for the US states (50 polygon), and another one for zipcodes (35k polygons) and applying each of these indexs to a set of 1 millions points would return results in 1 second for each ultindex. You could also apply an index for road or other lines at basically the same speed. 
 
 # What is an ultindex object?
-An ultindex is a deepdish h5 file that contains the following data structures:
+An ultindex is a HDFS pandas dataframe like file that contains the following data structures:
 * alignmentdf - a pandas dataframe that was the input to make the ultindex this object can easily be output to geojson
 * ultindex - a flat dictionary that utilizes the geohashs hierarchy that is assembled slightly different depending on whether the index represents lines or polygons 
 * areamask - a dictionary mask that saves bytes or size on the large ultindex by having a key value structure for area or line ids to a hexidecimal range so a hexidecimal number can be used in the heavily repeated ultindex instead of a long id or area. 
 * metadata - contains information about the type of ultindex that is being used 
 
-This data structure can be directly sent into a localization algorithm and determine how the localization algorithm needs to be applied based on the metadata. It can also be used to easily output/style the data structure your aggregating against and output to a geojson file.
+To get the ultindex into memory simply read in the h5 file with readh() function above. Thee output of this function can be  directly sent into a localization algorithm and determine how the localization algorithm needs to be applied based on the metadata. It can also be used to easily output/style the data structure your aggregating on and then output to a geojson file.
 
+You may be asking why would you need a wrapper function for simply reading in h5? Well the dataframes I place in the outputs of these files are actully all json string in a column value in pandas, I then have an index on that mirrors the json structure intended. Again you can by definately do this yourself, its just more annoying, so I wrote a dedicated function to unpack it to its desired structure.
 
 # Benchmarks / Reasons to Use
+
+## Polygon Benchmarks 
+
+You can run the benchmarks on your own dataset or the one I provided [here](https://github.com/murphy214/ult/tree/master/benchmark).
+
+Polygon benchmarks can be performed here basically I had 3 factors to measure, how fast it takes to create the index, how fast it is to get into workable memory, and how fast is the speed of the operation were applying to points using this object.
+
+The benchmarks below distinguish the difference between the two output types the output type regions splits dictionaries up into smaller subsideraries instead of one combined one which is bad if your indexs are over the amount of ram on your personal computer. So I wrote a method that allows you to get at least some performence when your index is to large, and its still probably better than alot of pips. 
+
+Total is the total time it took to make the index and write it out to the output h5 file. The first two make_set() and make_h5_output() are subsets of the make_polygon_index() process. readh() is the time it takes to get the index into memory where can be used and applied on datasets. 1 M indexs is the time it took to complete 1 million point in polygon queries from randomly generated points this assumes the points have already been geohashed. Which is a complete linear process and wouldn't be condusive to accurate benchmarks by profiling it within indexing alg.
+
+To map a table with lat / lng fields simply use the function ult.map_table(data,12,map_only =True) and it will take the lat / lng fields and hash each point on the table adding the column for you as well. 
+
+single | single_values | regions | regions_values
+ --- | --- | --- | ---
+"make_set(""single.h5"")" | 17.6731444597 | "make_set(""regions.h5"")" | 109.75850451
+"make_h5_output((""single.h5"")" | 0.542840123177 | "make_h5_output((""regions.h5"")" | 4.00887596607
+"total(""single.h5"")" | 18.2159904242 | "total(""regions.h5"")" | 113.767390013
+"readh(""single.h5"")" | 0.0348734855652 | "readh(""regions.h5"")" | 0.275012969971
+"1M INDEXS(""single.h5"")" | 0.5987585783 | "1M INDEXS(""regions.h5"")" | 3.49416255951
+
+# Line Index Benchmarks 
+TBA 
 
 ### Shapely Comparisons
 
@@ -78,7 +102,7 @@ Ult has several advantages I think makes it worth looking at.
 3. Lines output being the lineid, the distance along the line, as well as the percentage along the line is something I've never seen done on an algorithm like this.
 4. higher level polygon indexs can easily be related to the lowest smallest area hiearchy so that area_index can yield 6 different polygon indexs from the hierarchy that can easily be created. 
 
-[Video of me creating a polygon hierachy](https://www.youtube.com/watch?v=_PdABXMAO3w&feature=youtu.be)
+[Video of me creating a polygon hierachy](https://www.youtube.com/watch?v=_PdABXMAO3w&feature=youtu.be) - this is going to be awesome later, I still haven't figured out how to best implement it within the API.
 
 
 To create a hiearchy simply apply your lower geohash hiearchy ultindex to your next step up index until you get to the end. This actually has an added benefit I didn't even thing of, many libraries that utitilize ray casting and then represent hiearchy to drill down find themselves in situations where they have to clip alot of areas to complete there hiearchy correctly. This operation in of itsself is super complex annoying, my indexs complete negate needing to do this by mapping the previous index to the next one up. 
