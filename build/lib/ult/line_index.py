@@ -397,7 +397,6 @@ def line_index(data,index):
 	# for the lineid values
 	holder = data['GEOHASH'].str[:9].map(lambda x:ultindex.get(x,['','','']))
 	holder = pd.DataFrame(holder.values.tolist(),columns=['LINEID','DISTANCE','PERCENT'])
-	print holder
 	data[['LINEID','DISTANCE','PERCENT']] = holder[['LINEID','DISTANCE','PERCENT']]
 	data['LINEID'] = data['LINEID'].map(lambda x:areamask.get(x,''))
 	

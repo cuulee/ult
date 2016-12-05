@@ -951,7 +951,7 @@ def make_single_ring(outer_ring,inner_rings,**kwargs):
 
 # iterates through each unique ring series
 # selecting part of the alignment frame for each
-def make_ring_index(data):
+def make_ring_index(data,printoff=False):
 	# adding the data column ring to df	
 	ringhole = data['PART'].str.split('_',expand=True)
 	data[['RING','HOLE']] = ringhole
@@ -970,7 +970,7 @@ def make_ring_index(data):
 		totals.append(total)
 
 		count += 1
-		if not uniques == 1:
+		if printoff == False:
 			print 'Rings within Area: [%s/%s] & Ring Time: %s' % (count,len(uniques),time.time()-s)
 	totals = pd.concat(totals)
 	return totals
