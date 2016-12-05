@@ -4,6 +4,7 @@
 
 Geospatial problems are hard, especially when having to relatee a set of geometries (lines or polygons) to a substantial set of points, traditional methodologies essentially are infeasible over 100k + points without huge computing time lost. The solution is pretty simple remove geometry entirely from the operation. Like many things in CS this trades precomputation time of the indexs with the performence boost of using said indicies. 
 
+An example webmap of the kind of output it creates and how it works and can be found [here](https://rawgit.com/murphy214/dummy1/master/index.html)
 
 ##### Pictures
 ![](https://cloud.githubusercontent.com/assets/10904982/20707851/3e5f16e4-b5fb-11e6-9d9e-40c0fd3d6fb8.png)
