@@ -9,6 +9,8 @@ Geospatial problems are hard, especially when having to relatee a set of geometr
 ##### Pictures
 ![](https://cloud.githubusercontent.com/assets/10904982/20707851/3e5f16e4-b5fb-11e6-9d9e-40c0fd3d6fb8.png)
 ![](https://cloud.githubusercontent.com/assets/10904982/20707852/3e6581f0-b5fb-11e6-9ba0-a19e68ba2b86.png)
+![](https://cloud.githubusercontent.com/assets/10904982/20912632/c2bc9568-bb3e-11e6-8466-90cc8ee458b4.png)
+*The picture above gives some insight on how the lines api works internally.*
 
 # What is ult?
 <p align="center">
