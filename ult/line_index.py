@@ -75,7 +75,7 @@ def generate_points_geohash(number_of_points,point1,point2,name,size,currentdist
 	lastdist = currentdist + distance(point1,point2)
 	g2 = geohash.encode(y2,x2,size)
 
-	stringlist.append('%s,%s,%s,%s' % (ghash,name,str(lastdist),strmaxdistance))
+	stringlist.append('%s,%s,%s,%s' % (g2,name,str(lastdist),strmaxdistance))
 	
 	indexs = np.unique(geohashlist,return_index=True)[1]
 	stringlist = [stringlist[i] for i in sorted(indexs)]
