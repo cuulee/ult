@@ -25,6 +25,8 @@ def get_extrema(df):
 
 	return extrema
 
+
+# creates a range of lats / longs then zips
 def create_range(val1,val2):
 	if val1 > val2:
 		minval = val2
@@ -42,6 +44,8 @@ def create_range(val1,val2):
 	newlist.append(maxval)
 	return newlist
 
+
+# makes geohahs
 def make_geohashs(c1,c2,size):
 	lat1,long1 = geohash.decode(c1)
 
@@ -55,6 +59,8 @@ def make_geohashs(c1,c2,size):
 	ghashs = [geohash.encode(i[0],i[1],size) for i in total]
 	ghashs = np.unique(ghashs).tolist()
 	return ghashs
+
+
 def countfunc(x):
 	global count
 	global xs
@@ -63,6 +69,8 @@ def countfunc(x):
 	addxs = [count] * len(x)
 
 	xs += addxs
+
+# hacky implementaton of the best way to make ageohash grid
 def make_lat_longs(ghashs):
 	global count
 	global xs
@@ -135,17 +143,6 @@ def get_indexlist(geohashlist,hashtablevals):
 	for row in geohashlist:
 		index = get_index(hashtablevals,row)
 		newlist.append(index)
-	return newlist
-
-# given a indexlist with [x,y] in each row return stringified indicy
-# 'x,y'
-def stringify_indicies(indexlist):
-	newlist = []
-
-	for row in indexlist:
-		row = str(row[0]) + ',' + str(row[1])
-		newlist.append(row)
-
 	return newlist
 
 
@@ -264,6 +261,8 @@ def vert_line_test_exhaustive(data,itable,innerbool):
 
 	return pd.DataFrame(newlist[1:],columns=newlist[0])
 
+# makes bin / labes for the pd.cut operation
+# assembling a range and creating labels
 def make_bins_labels(dictthing):
 	newdict = {}
 	for name in sorted(dictthing.keys()):	
@@ -507,7 +506,6 @@ def assemble_outputs(unstackedinner,**kwargs):
 	return_total = False
 	# kwarg code block
 
-
 	# setting initial outputs that will be appended or added
 	total = []
 	innergeohashs = []
@@ -520,21 +518,14 @@ def assemble_outputs(unstackedinner,**kwargs):
 	uniques = unstackedinner[unstackedinner['GEOHASH'] == 32]['GEOHASH1'].values.tolist()
 	unstackedinner1['BOOL'] = unstackedinner1['GEOHASH1'].isin(uniques)
 	
-	'''
-	for name,group in unstackedinner:
-		if len(group) == 32:
-			total.append(name)
-		else:
-			total += group['GEOHASH'].values.tolist()
-	'''
 	total = pd.DataFrame(uniques + unstackedinner1[unstackedinner1['BOOL'] == False]['GEOHASH'].values.tolist(),columns=['total'])
 	return total
+
 # converts indicies to string representation
 # an applymap on all df function
 def get_ind(geohash):
 	global hashtable
 	ind = get_index(hashtable,geohash)
-
 	return str(ind[0]) + ',' + str(ind[1])
 
 # given a point1 x,y and a point2 x,y returns distance in miles
@@ -590,75 +581,6 @@ def first_last(data):
 	else:
 		return data
 
-# takes geohash and a point returns percentage of point left to right and percentage point down
-def fill_indicies(data,innerhashtable,precision):
-
-	# function for linting whether the first point and lastpoint are the same if not appends talbe
-	data = first_last(data)
-
-	# getting the geohash table back
-	data = map_table(data,precision,map_only=True)
-
-	# getting the table with ind partial positons back
-	data = ind_dec_points(data)
-
-	global hashtable
-	hashtable = innerhashtable
-
-	
-	# getting official indices adding the parital to the complete
-	table = data['GEOHASH'].map(get_ind)
-	table = table.str.split(',',expand=True)
-	table.columns = ['x','y']
-	data[['x']] = table['x'].astype(int) + data['x']
-	data[['y']] = table['y'].astype(int) + data['y']
-
-	newlist = []
-	count = 0
-	ind = False
-
-	for row,b in itertools.izip(data[['x','y']].values.tolist(),data['GEOHASH'].values.tolist()):
-		if count == 0:
-			count = 1
-			oldrow = row
-		else:
-
-			dist = distance(oldrow,row)
-			dist = round(dist,0)
-			if not dist == 0:
-				points = generate_points(int(dist*3),oldrow,row)
-				for row in points[1:]:
-					x,y = round(row[0],0),round(row[1],0)
-					x,y = int(x),int(y)
-					try:
-						b = hashtable[x][y]
- 					except KeyError:
- 						pass
- 					if not [x,y] == oldrow or not oldhash == b:
-						newlist.append([x,y])
-						oldhash = b
-						oldrow = [x,y]
-			if not oldhash == b or not oldrow == row:
-				x,y = round(row[0],0),round(row[1],0)
-				x,y = int(x),int(y)
-				newlist.append([x,y])
-			
-		oldrow = row
-		oldhash = b 
-
-
-	newlist2 = []
-	for row in newlist:
-		if count == 0:
-			count = 1
-			newlist2.append(row)
-		else:
-			if not oldrow == row:
-				newlist2.append(row)
-		oldrow = row
-	return newlist2 
-
-
 
 # hopefully a function can be made to properly make into lines
 def fill_geohashs(data,size):
@@ -711,73 +633,6 @@ def fill_geohashs(data,size):
 	newlist = pd.DataFrame(newlist,columns=['LONG','LAT'])
 	newlist = map_table(newlist,size,map_only=True)
 	return newlist
-
-# makes a geospatial index / dict structure to easily aggregate areas and other polygons
-def make_index(data,**kwargs):
-	output = False
-	areaname = False
-	maxsize = False
-	rings = False
-	next_level = False
-	for key,value in kwargs.iteritems():
-		if key == 'output':
-			output = value
-		if key == 'areaname':
-			areaname = value
-		if key == 'maxsize':
-			maxsize = int(value)
-		if key == 'rings':
-			rings = value
-		if key == 'next_level':
-			next_level = value
-	# logic for assembling a complex index with multiple rings
-	if rings == True and not areaname == False:
-		total = make_ring_index(data)
-		total['area'] = areaname
-		minsize = total['total'].str.len().min()
-		maxsize = total['total'].str.len().max()
-		
-		# logic for turning the maxsize into hexidecimal to 
-		# maintain one byte placing
-		if maxsize > 9:
-			maxsize = hex(maxsize)[2:]
-
-		appendstr = str(minsize) + str(maxsize)	
-
-		areaname = str(areaname) + '_' + appendstr
-		if output == True:
-			total.to_csv(str(areaname) + '.csv',index=False)
-			return total
-		else:
-			return total
-	elif not rings == False and not areaname == False:
-		total = make_single_ring(data,rings,next_level=next_level)
-		total['area'] = areaname
-		minsize = total['total'].str.len().min()
-		maxsize = total['total'].str.len().max()
-		
-		# logic for turning the maxsize into hexidecimal to 
-		# maintain one byte placing
-		if maxsize > 9:
-			maxsize = hex(maxsize)[2:]
-
-		appendstr = str(minsize) + str(maxsize)	
-
-		areaname = str(areaname) + '_' + appendstr
-		if output == True:
-			total.to_csv(str(areaname) + '.csv',index=False)
-			return total
-		else:
-			return total
-
-
-	areadf,next_level = get_innerhashs_small(data,maxsize,next_level=next_level)
-	total = assemble_outputs(areadf)
-	if not len(next_level) == 0:
-		total = pd.concat([total,next_level])
-		total = filter_lint_data3d(total,data,[])
-	return total
-
 
 def indexs_tofiles(total,inner,outerdict):
 	with open('areadict.json','wb') as newgeojson:
