@@ -130,23 +130,33 @@ def fill_geohashs(data,name,size,maxdistance):
 	neighbors = []
 	ghashdict = {}
 	dist = 0
+	ind = 0
 	for row in data:
 		if count == 0:
 			count = 1
+			geohashlist.append('%s,%s,%s,%s' % (geohash.encode(row[0],row[1],9),name,str(currentdist),str(maxdistance)))
 		else:
 			slope = get_slope(oldrow,row)
 			x1,y1 = oldrow
 			dist = distance(oldrow,row)
 			positions = solve_xmin(oldrow,row,size)
 
-			if dist > hashsize / 5.0:
+			if dist > hashsize / 5.0 or ind == 0:
 				number = (dist / hashsize) * 5.0
-				number = int(number)
+				number = int(number)				
+
+				if ind == 0 and not dist == 0 and not number > 10:
+					ind = 1
+					number = 10
+
 				addghashs = generate_points_geohash(number,oldrow,row,name,size,currentdist,maxdistance)[1:]
 
 				geohashlist += addghashs
 			else:
 				point = row
+				
+				geohashlist.append('%s,%s,%s,%s' % (geohash.encode(point[0],point[1],9),name,str(currentdist),str(maxdistance)))
+
 			currentdist += dist
 
 		oldrow = row
@@ -395,7 +405,7 @@ def make_line_test(ultindex,number):
 def applyfunc(array):
 	return len(np.unique(array))
 
-
+# the (old) mapped function
 def one_line_index(ghash):
 	global ultindex
 	global areamask
@@ -414,6 +424,21 @@ def one_line_index(ghash):
 			return ''
 		else:
 			return areamask.get(current,'')
+
+# splits the output returned from line_index
+def split_text_output(df):
+	from mapkit import make_colorkey
+	df[['LINEID','DISTANCE','MAXDIST']] = df['TEXT'].astype(str).str.split(',',expand=True).astype(float)
+	df['PERCENT'] = (df['DISTANCE'] / df['MAXDIST'])	* 100.
+	return make_colorkey(df,'PERCENT',numeric=True,linear=True)
+
+
+def df_from_ultindex(ultindex):
+	return pd.DataFrame(ultindex['ultindex'].items(),
+		columns = ['GEOHASH','TEXT'])
+def index_df(ultindex):
+	df = df_from_ultindex(ultindex)
+	return split_text_output(df)
 
 def return_id_distance(x):
 	a = areamask.get(ultindex['LINEID'].get(x[:9],''),'')

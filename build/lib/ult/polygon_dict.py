@@ -84,42 +84,18 @@ def combine_csvs(files,outfilename,**kwargs):
 	with open(outfilename,'wb') as f:
 		f.write(total)
 
-
-# makes a test block and returns the points for the index
-def make_test_block(ultindex,number):
-	from mapkit import unique_groupby
-	from pipegeohash import map_table,random_points_extrema
-	#indexdict = read_json('states_ind.json')
-	extrema = {'n': 50.449779,'s': 20.565774,'e':-64.493017,'w':-130.578836}
-	data = random_points_extrema(number,extrema)
-	print data
-	data = map_table(data,12,map_only=True)
-	print data
-	s = time.time()
-	data = area_index(data,ultindex)
-	print 'Time for just indexing: %s' % (time.time() - s)
-	data = data[data['AREA'].str.len() > 0]
-	data = unique_groupby(data,'AREA',hashfield=True,small=True)
-	data['color'] = data['COLORKEY']
-	return data
-
-
 # maps one geohash to what it needs to be
 # as simple as it gets
-def one_polygon_index(ghash):
-	global minsize
-	global maxsize
-	global ultindex
-	global areamask
+def one_polygon_index(ghash,ultindex,minsize,maxsize,dummyoutput):
 	current = minsize
 	while current < maxsize:
 		output = ultindex.get(ghash[:current],'')
 		if output == -1:
 			current += 1
 		elif output == '':
-			return ''
+			return dummyoutput
 		else:
-			return areamask.get(output,'')
+			return output
 
 # maps one geohash to what it needs to be
 def one_polygon_index_regions(ghash):
@@ -169,18 +145,33 @@ def mapfunc(data):
 # index is the top level index data structure
 # objects within the h5 file handle the difference between 
 # regions and single output files
-def area_index(data,index):
-	global minsize
-	global maxsize
-	global ultindex
-	global areamask
+def area_index(data,index,column='AREA',dummyoutput=False):
+	# getting the header value if it exists
+	header = index['metadata'].get('headers','')
+	
+	# logic for handling dummy output
+	if dummyoutput == False:
+		if not header == '':
+			text = ''
+			for i in header:
+				text += ','
+			dummyoutput = text[:-1]
+		else:
+			dummyoutput = ''
+	else:
+		dummyoutput = 0
+
 	ultindex = index['ultindex']
-	areamask = index['areamask']
 	minsize = index['metadata']['minsize']
 	maxsize = index['metadata']['maxsize']
 	output_type = index['metadata']['output_type']
 	if output_type == 'single':
-		data['AREA'] = data['GEOHASH'].map(one_polygon_index)
+		if not header == '':
+			data[header] = data['GEOHASH'].str[:maxsize].apply(one_polygon_index,args=(ultindex,minsize,maxsize,dummyoutput)).str.split(',',expand=True)
+			data = data[data[header[0]] != '']
+		else:
+			data[str(column)] = data['GEOHASH'].str[:maxsize].apply(one_polygon_index,args=(ultindex,minsize,maxsize,dummyoutput))
+		#data[str(column)] = data['GEOHASH'].str[:maxsize].apply(one_polygon_index2)
 		return data
 	elif output_type == 'regions':
 		global totalultindex 
@@ -203,7 +194,6 @@ def area_index(data,index):
 		data['AREA']  = dataholder[0]
 		data = data.reset_index()
 		return data
-
 # simple iterattor
 def gener(list):
 	for row in list:
@@ -282,6 +272,23 @@ def make_json_string(data,intbool=False):
 	return '{%s}' % data.groupby('a')['STRING'].apply(lambda x:"%s" % ', '.join(x))['z']
 
 
+
+# makes a json string representation given a df or dictionary object
+def make_json_string_combined(data,intbool=False):
+	if isinstance(data,dict):
+		data = pd.DataFrame(data.items(),columns=['GEOHASH','AREA'])
+
+	data1 = data[data['AREA'] == -1]
+	data2 = data[data['AREA'] != -1]
+
+	# creating output string for dataframe
+	data1['STRING'] = '"' + data['GEOHASH'].astype(str) + '":' + data['AREA'].astype(str) 	
+	data2['STRING'] = '"' + data['GEOHASH'].astype(str) + '":"' + data['AREA'].astype(str) + '"'
+	data = pd.concat([data1,data2])
+	
+	data['a'] = 'z'
+	return '{%s}' % data.groupby('a')['STRING'].apply(lambda x:"%s" % ', '.join(x))['z']
+
 # this function creates an hdf5 output that contains
 # an ultindex dictionary the actual output
 # assumes input will be progress h5 in the current directroy
@@ -348,7 +355,7 @@ def make_h5_output(filename,**kwargs):
 
 		# making the json string this will be placed into a datarame
 		# then read into memory upon reading in a speific read_fucntion for ultindex
-		jsonstring = make_json_string(totaldict,intbool=True)
+		jsonstring = make_json_string_combined(totaldict)
 
 		# making meta dictioanry		
 		areamask = json.dumps(areamask)
@@ -405,7 +412,7 @@ def make_h5_output(filename,**kwargs):
 
 			# turining into sparse dataframe
 			
-			ultindex[str(i)] = make_json_string(df.to_dense().fillna(method='ffill'),intbool=True)
+			ultindex[str(i)] = make_json_string_combined(df.to_dense().fillna(method='ffill'))
 
 			#df.to_csv(str(i)+'.csv',index=False)
 			print '[%s / %s]' % (count,size)
@@ -448,7 +455,7 @@ def make_wrapper(args):
 
 		# adding the area field into thesparse dataframe
 		total['AREA'] = np.nan
-		total['AREA'].iloc[0] = areamask2[str(name)]
+		total['AREA'].iloc[0] = str(name)
 
 		# getting the min & max values
 		minval = total['total'].str.len().min()
@@ -556,7 +563,7 @@ def make_set(data,field,**kwargs):
 
 		# adding area with np.nan as dominat value
 		total['AREA'] = np.nan
-		total['AREA'].iloc[0] = areamask2[str(name)]
+		total['AREA'].iloc[0] = str(name)
 
 		#total['AREA'] = areamask2[str(name)]
 
