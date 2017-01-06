@@ -134,7 +134,7 @@ def fill_geohashs(data,name,size,maxdistance):
 	for row in data:
 		if count == 0:
 			count = 1
-			geohashlist.append('%s,%s,%s,%s' % (geohash.encode(row[0],row[1],9),name,str(currentdist),str(maxdistance)))
+			geohashlist.append('%s,%s,%s,%s' % (geohash.encode(row[1],row[0],9),name,str(currentdist),str(maxdistance)))
 		else:
 			slope = get_slope(oldrow,row)
 			x1,y1 = oldrow
@@ -154,8 +154,7 @@ def fill_geohashs(data,name,size,maxdistance):
 				geohashlist += addghashs
 			else:
 				point = row
-				
-				geohashlist.append('%s,%s,%s,%s' % (geohash.encode(point[0],point[1],9),name,str(currentdist),str(maxdistance)))
+				geohashlist.append('%s,%s,%s,%s' % (geohash.encode(point[1],point[0],9),name,str(currentdist),str(maxdistance)))
 
 			currentdist += dist
 
@@ -211,7 +210,8 @@ def make_line_index(data,outfilename,**kwargs):
 			precision = value
 		if key == 'benchmark':
 			benchmark = value
-
+		if key == 'return_index':
+			return_index = value
 
 	if uniqueid == False:
 		uniqueidheader = 'gid'
@@ -260,13 +260,12 @@ def make_line_index(data,outfilename,**kwargs):
  	for coords,row in itertools.izip(data['coords'].map(get_cords_json).values.tolist(),data.values.tolist()):
 		name = row[uniqueidrow]
 		maxdistance = segdistance[int(name)]
-		
 		addgeohashs = fill_geohashs(coords,name,precision,maxdistance)
 		geohashlist += addgeohashs
 		if count == 1000:
 			total += count
 			count = 0
-			print '[%s / %s]' % (total,len(data))
+			#print '[%s / %s]' % (total,len(data))
 
 		count += 1
 
@@ -282,7 +281,6 @@ def make_line_index(data,outfilename,**kwargs):
 	# iterating through each secton of the large dataframe were splitting up
 	for aligns in np.array_split(pd.DataFrame(geohashlist,columns=['TEXT']),20):
 		count+= 1
-		print '[%s / %s]' % (count,20)
 
 		# getting geohshs
 		aligns['GEOHASH'] = aligns['TEXT'].str[:9]
@@ -314,7 +312,13 @@ def make_line_index(data,outfilename,**kwargs):
 
 	enddftime = time.time() - startdftime
 
-
+	if return_index == True:
+		data = pd.DataFrame(ultindex.items(),columns=['GEOHASH','TEXT'])
+		data[['gid','DISTANCE','MAXDISTANCE']] = data['TEXT'].str.split(',',expand=True)
+		data['gid'] = data['gid'].astype(float).astype(int)
+		output = data.groupby('gid')['GEOHASH'].apply(lambda x: "%s" % ','.join(x)).reset_index()[['gid','GEOHASH']]
+		output['TEXT'] = data.groupby('gid')['TEXT'].apply(lambda x: "%s" % '|'.join(x)).reset_index()['TEXT']
+		return output,output['gid'].values.tolist()
 	# make line index metadata
 	metadata = make_meta_lines(8,9,len(segdistance))
 	df = pd.DataFrame([json.dumps(ultindex),json.dumps(linemask2),json.dumps(metadata)],index=['ultindex','areamask','metadata'])

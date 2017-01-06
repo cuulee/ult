@@ -46,9 +46,10 @@ def map_expand(x):
 # combines an input of ultindex h5 files
 # given in the proper hiearchy from base to top level
 def combine_indexs(fileslist,fieldlist,filename):
+	from polygon_dict import readh
 	fieldlistint = fieldlist
 	# getting all indexs
-	indexs = [ult.readh(i) for i in fileslist]
+	indexs = [readh(i) for i in fileslist]
 	mins = []
 	maxs = []
 	for i in indexs:
@@ -130,7 +131,6 @@ def combine_indexs(fileslist,fieldlist,filename):
 	basedf = pd.concat([basedf1,newvalues])
 	print '[5/6] Created basedf and upperdf'
 
-	basedf[fieldlistint] = basedf[fieldlistint].astype(int)
 	for i in fieldlistint:
 		if not i == fieldlistint[-1]:
 			basedf[i] = basedf[i].astype(str) + ','
