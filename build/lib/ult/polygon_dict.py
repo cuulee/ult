@@ -1,3 +1,5 @@
+from __future__ import unicode_literals
+from future.utils import bytes_to_native_str as n
 import pandas as pd 
 import numpy as np 
 import itertools
@@ -5,10 +7,9 @@ import time
 import os
 import simplejson as json
 from pipegeohash import map_table,random_points_extrema,lint_values
-from polygon_ind import make_ring_index
+from .polygon_ind import make_ring_index
 import geohash
-import kyoto as kt
-
+import future
 
 # sringify the output of a line segment
 def stringify(coords):
@@ -27,7 +28,7 @@ def reduce_to_min(data,**kwargs):
 			.reset_index())
 	maxsize = data['total'].str.len().max()
 	minsize = data['total'].str.len().min()
-	for key,value in kwargs.iteritems():
+	for key,value in kwargs.items():
 		if key == 'minsize':
 			minsize = value
 	current = maxsize - 1
@@ -59,7 +60,7 @@ def openfile(filename):
 # combines csv files to a big csv much much faster
 def combine_csvs(files,outfilename,**kwargs):
 	min = False
-	for key,value in kwargs.iteritems():
+	for key,value in kwargs.items():
 		if key == 'min':
 			min = value
 
@@ -78,7 +79,7 @@ def combine_csvs(files,outfilename,**kwargs):
 		if count == 1000:
 			count = 1
 			totalcount += 1000
-			print '[%s/%s]' % (totalcount,len(files))
+			print('[%s/%s]' % (totalcount,len(files)))
 	total = '\n'.join(total)
 
 	with open(outfilename,'wb') as f:
@@ -110,7 +111,6 @@ def one_polygon_index_regions(ghash):
 	current = minsize
 	while current < maxsize:
 		output = currentindex.get(ghash[:current],'')
-		#print output,ghash,current,ghash[:current]
 		# logic for continuing or not
 		if output == -1:
 			current += 1
@@ -127,10 +127,10 @@ def mapfunc(data):
 
 	name = data.name	
 	data = data.set_index('i')
- 	name = str(data['wam'][:1].values.tolist()[0])
- 	try:
+	name = str(data['wam'][:1].values.tolist()[0])
+	try:
 		ultindex = totalultindex[name]
-		print '[%s / %s] Iterating through each region. ' % (count,len(totalultindex.keys()))
+		print('[%s / %s] Iterating through each region. ' % (count,len(totalultindex.keys())))
 		count += 1
 	except:
 		data['a'] = ''
@@ -205,7 +205,7 @@ def construct_area_mask(uniqueareas):
 	newdict = {}
 	newdict2 = {}
 	newdict = dict.fromkeys(range(len(uniqueareas)))
-	for i,area in itertools.izip(range(len(uniqueareas)),uniqueareas):
+	for i,area in zip(range(len(uniqueareas)),uniqueareas):
 		hexi = i
 		newdict[int(i)] = area
 		newdict2[area] = hexi
@@ -252,7 +252,6 @@ def make_files(dflist):
 	files = []
 	with pd.HDFStore('progress.h5') as progress:
 		for alist in dflist:
-			print alist
 			files.append(progress[str(alist)])			
 	return files
 
@@ -276,7 +275,7 @@ def make_json_string(data,intbool=False):
 # makes a json string representation given a df or dictionary object
 def make_json_string_combined(data,intbool=False):
 	if isinstance(data,dict):
-		data = pd.DataFrame(data.items(),columns=['GEOHASH','AREA'])
+		data = pd.DataFrame([i for i in data.items()],columns=['GEOHASH','AREA'])
 
 	data1 = data[data['AREA'] == -1]
 	data2 = data[data['AREA'] != -1]
@@ -296,7 +295,7 @@ def make_json_string_combined(data,intbool=False):
 def make_h5_output(filename,**kwargs):
 	output = 'single'
 	printoff = False
-	for key,value in kwargs.iteritems():
+	for key,value in kwargs.items():
 		if key == 'output':
 			output = value
 		if key == 'printoff':
@@ -415,7 +414,7 @@ def make_h5_output(filename,**kwargs):
 			ultindex[str(i)] = make_json_string_combined(df.to_dense().fillna(method='ffill'))
 
 			#df.to_csv(str(i)+'.csv',index=False)
-			print '[%s / %s]' % (count,size)
+			print('[%s / %s]' % (count,size))
 		
 		# making meta dictioanry 		
 		areamask = json.dumps(areamask)
@@ -481,7 +480,7 @@ def make_wrapper(args):
 					ind = 1
 			make_json({'status':False},'ind.json')
 			totals = []
-		print '[%s/%s] for Process:%s in %s' % (totalcount,size,process,time.time() - s)		
+		print('[%s/%s] for Process:%s in %s' % (totalcount,size,process,time.time() - s))
 	return []
 
 
@@ -491,7 +490,7 @@ def make_set(data,field,**kwargs):
 	makesetstart = time.time()
 	sc = False
 	printoff = False
-	for key,value in kwargs.iteritems():
+	for key,value in kwargs.items():
 		if key == 'sc':
 			sc = value
 		elif key == 'printoff':
@@ -524,7 +523,7 @@ def make_set(data,field,**kwargs):
 	# if a sparck context (sc) is passed in as a kwarg
 	# will deviate entire rest of function to a parrelizeed
 	# worker processes splitting up the areas remaining
- 	if not sc == False:
+	if not sc == False:
 		#splits = np.array_split(data['COMB'].values,8)
 		areas = np.unique(data['AREA'])
 		data = data.set_index('AREA')
@@ -579,7 +578,7 @@ def make_set(data,field,**kwargs):
 		count += 1
 		avg = round(totaltime / float(count - startcount),2)
 		if printoff == False:
-			print 'Areas Complete: [%s / %s], AVGTIME: %s s' % (count,sizeareas,avg)
+			print('Areas Complete: [%s / %s], AVGTIME: %s s' % (count,sizeareas,avg))
 		
 		counterwrite += 1
 		totalslist.append(total)
@@ -605,7 +604,7 @@ def make_polygon_index(data,filename,**kwargs):
 	output = 'single'
 	sc = False
 	retain_progress = False
-	for key,value in kwargs.iteritems():
+	for key,value in kwargs.items():
 		if key == 'output':
 			output = value
 		if key == 'sc':
@@ -615,20 +614,20 @@ def make_polygon_index(data,filename,**kwargs):
 
 	# making ech indiviual dataframee solve for each area
 	make_set(data,'AREA',sc=sc)
-	print 'Made progress h5 file now constructing ouput file.'
+	print('Made progress h5 file now constructing ouput file.')
 
 	# taking those subsequent dataframes and creating the output
 	make_h5_output(filename,output=output)
-	print 'Made output h5 file containing datastructures:'
-	print '\t- alignmentdf (type: pd.DataFrame)'
-	print '\t- areamask (type: dict)'
-	print '\t- ultindex (type: dict)'
-	print '\t- metadata (type: dict)'
+	print('Made output h5 file containing datastructures:')
+	print('\t- alignmentdf (type: pd.DataFrame)')
+	print('\t- areamask (type: dict)')
+	print('\t- ultindex (type: dict)')
+	print('\t- metadata (type: dict)')
 	
 
 	if retain_progress == False:
 		os.remove('progress.h5')
-		print 'Removed progress.h5 from directory'
+		print('Removed progress.h5 from directory')
 
 
 # creates a blocks dataframe from the ultindex
@@ -694,23 +693,38 @@ def make_sparse_big(index):
 def make_json(dictionary,filename):
 	with open(filename,'wb') as f:
 		json.dump(dictionary,f)
-	print 'Wrote Json.'
 
 # function for reading json 
 def read_json(filename):
 	with open(filename,'rb') as f:
 		return json.load(f)
 
+
+
+
 # function for reading an h5 file containing an ultindex
 def readh(filename):
 	hdfsbool = False
 	with pd.HDFStore(filename) as out:
 		try:
-			combined = out['combined']
-			alignmentdf = out['alignmentdf']
+			combined = out['/combined']
+			alignmentdf = out['/alignmentdf']
 			hdfsbool = True
 		except:
-			pass
+			try:
+				combined = out['combined']
+				alignmentdf = out['alignmentdf']
+				hdfsbool = True
+			except:
+				pass
+		try:
+			stringdf = out['/stringdf']
+		except:
+			try:
+				stringdf = out['stringdf']
+			except:
+				pass
+
 	if hdfsbool ==True:
 		newlist = []
 		for row in combined.index.values.tolist():
@@ -718,8 +732,12 @@ def readh(filename):
 				newlist.append(row)
 		metadata = json.loads(combined[0].loc['metadata'])
 		areamask = json.loads(combined[0].loc['areamask'])
-		print metadata['output_type']
-		if metadata['output_type'] == 'single':
+		if combined[0].loc['ultindex'] == 'stringdf':
+			areamask = {}
+			stringdf['a'] = 'a'
+			ultindex = '{%s}' % stringdf.groupby('a')['TEXT'].apply(lambda x:"%s" % ','.join(x))['a']
+			ultindex = json.loads(ultindex)
+		elif metadata['output_type'] == 'single':
 			areamask1 = {}
 			keys = [int(i) for i in areamask.keys()]
 			areamask = dict(zip(keys,areamask.values()))
@@ -743,4 +761,3 @@ def readh(filename):
 					'areamask':areamask,
 					'metadata':metadata}
 	return ultindex
-

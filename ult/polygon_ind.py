@@ -5,7 +5,8 @@ import json
 import itertools
 import time
 from pipegeohash import map_table
-from geohash_logic import *
+from geohash_logic import get_corner
+import future
 
 # gets the extrema dictionary of the alignment df
 def get_extrema(df):
@@ -45,45 +46,53 @@ def create_range(val1,val2):
 	return newlist
 
 
-# makes geohahs
-def make_geohashs(c1,c2,size):
-	lat1,long1 = geohash.decode(c1)
+def map_table_new(data,precision=False,return_geohashs=False):
+	for row in data.columns.values.tolist():
+		if 'lat' in str(row).lower():
+			lathead = row
+		elif 'long' in str(row).lower():
+			longhead = row
 
+	# filtering all the inapplicable data
+	data = data[(data[lathead] < 90.0) & (data[lathead] > -90.0)]
+	myfunc = np.vectorize(geohash.encode)
+
+
+	if return_geohashs == True:
+		if precision == False:
+			myfunc(data[lathead].values,data[longhead].values)
+		else:
+			myfunc(data[lathead].values,data[longhead].values,precision)
+	else:
+		if precision == False:
+			data['GEOHASH'] = myfunc(data[lathead].values,data[longhead].values)
+		else:
+			data['GEOHASH'] = myfunc(data[lathead].values,data[longhead].values,precision)
+
+	return data
+
+
+def make_points_geohash(c1,c2,size):
+	lat1,long1,latdelta,longdelta = geohash.decode_exactly(c1)
 	lat2,long2 = geohash.decode(c2)
 
-	lats = create_range(lat1,lat2)
-	longs = create_range(long1,long2)
+	latdelta,longdelta = latdelta * 2,longdelta * 2
+	
+	# creating lats and longs
+	longs = np.linspace(long1,long2,(abs(long2 - long1) / longdelta) + 1)
+	lats = np.linspace(lat1,lat2,(abs(lat2 - lat1) / latdelta) + 1)
+
+
+
 	total = []
-	for lat in lats:
-		total += zip([lat] * len(longs),longs)
-	ghashs = [geohash.encode(i[0],i[1],size) for i in total]
-	ghashs = np.unique(ghashs).tolist()
-	return ghashs
+	count = 0
+	for long in longs:
+		total += zip(lats,[long] * len(lats),[count] * len(lats))
+		count += 1
+	total = pd.DataFrame(total,columns=['LAT','LONG','X'])
 
+	return map_table_new(total,precision=size)
 
-def countfunc(x):
-	global count
-	global xs
-	global addxs
-	count += 1
-	addxs = [count] * len(x)
-
-	xs += addxs
-
-# hacky implementaton of the best way to make ageohash grid
-def make_lat_longs(ghashs):
-	global count
-	global xs
-	xs = []
-	count = -1
-	points = [geohash.decode(i) for i in ghashs]
-	df = pd.DataFrame(points,columns=['LAT','LONG'])
-	df['GEOHASH'] = ghashs
-
-	df = df.sort(['LONG'],ascending=[1])
-	df.groupby('LONG').apply(countfunc)
-	df['X'] = xs[:len(df)]
-	return df
 
 # getting the outermost precision in which blocks can fit within bounds
 def get_inner_hashtable(df,maxsize):
@@ -103,20 +112,7 @@ def get_inner_hashtable(df,maxsize):
 	# bigger than 3x3 is returned
 	ind = 0
 	current = 0
-	while ind == 0:
-		current += 1
-
-		# getting the current level of precision that is being tested
-		ulcurrent = ulhash[:current]
-		lrcurrent = lrhash[:current]
-
-		# checking to see if values arent the same
-		if not ulcurrent == lrcurrent:
-			hashtable = make_hashtable_range(ulcurrent,lrcurrent)
-			shape = hashtable.shape
-			if shape[0] > 3 and shape[1] > 3:
-				ind = 1
-	
+		
 	if maxsize == False:
 		# setting the size of the proper ul hashs and lr hashs
 		ulhash = ulhash[:current+2]
@@ -131,8 +127,8 @@ def get_inner_hashtable(df,maxsize):
 	lrhash = get_corner(lrhash,'lr')
 
 	# making the inner most hashtable needed
-	ghashs = make_geohashs(ulhash,lrhash,maxsize)
-	hashtable = make_lat_longs(ghashs)
+	hashtable = make_points_geohash(ulhash,lrhash,maxsize)
+
 	return hashtable
 
 # getting index list
@@ -208,7 +204,7 @@ def vert_line_test(data):
 		if count == 10:
 			total += 10
 			count = 0
-			print '[%s / %s]' % (total,len(data))	
+			print('[%s / %s]' % (total,len(data)))
 		count += 1	
 	return newlist
 
@@ -246,7 +242,7 @@ def vert_line_test_exhaustive(data,itable,innerbool):
 
 			if count == 1000:
 				total += count
-				print 'Progress: [%s/%s]' % (total,len(data))
+				print('Progress: [%s/%s]' % (total,len(data)))
 				count = 0
 		else:
 			# gettin innerbool
@@ -255,7 +251,7 @@ def vert_line_test_exhaustive(data,itable,innerbool):
 				newlist.append(newrow)				
 			if count == 1000:
 				total += count
-				print 'Progress: [%s/%s]' % (total,len(data))
+				print('Progress: [%s/%s]' % (total,len(data)))
 
 				count = 0
 
@@ -364,7 +360,6 @@ def map_points(point):
 def expand_geohashs(data2):
 	#data2 = data2.unstack(level=0).reset_index()
 	data3 = data2['GEOHASH'].map(map_points)
-	#print data3,len(data3),len(data2)
 	data2['STRING'] = data3
 	data3 = data3.str.split(',',expand=True)
 	data2[['LAT','LONG']] = data3.astype(float)
@@ -390,13 +385,17 @@ def traverse_columns_rows(innerdf,alignmentdf):
 	global innerhashdf
 	totallist = []
 	# vertical line intersection test
+
+	#s = time.time()
 	solves = solve_alignment(np.unique(innerdf['LONG']).tolist(),alignmentdf[['LONG','LAT']].values.tolist())
+	
 	ids = sorted([int(i) for i in solves.keys()])
 
 	#itable.to_csv('itable.csv',index=False)
 	#innergeohashs.to_csv('innerhashs.csv',index=False)
 	# preparing columns for vert_line_test
 	innerdf = prepare_columns(innerdf,solves)
+
 	# getting innergeohashs
 	innergeohashs = pd.DataFrame(innerdf,columns=['GEOHASH'])
 	return innergeohashs
@@ -413,7 +412,7 @@ def get_indexlist(filleddf,innerhashtable):
 def get_innerhashs_outsided(alignmentdf,maxsize,**kwargs):
 	next_level = False
 	innnerbool = False
-	for key,value in kwargs.iteritems():
+	for key,value in kwargs.items():
 		if key == 'next_level':
 			next_level = value
 		if key == 'innerbool':
@@ -462,7 +461,7 @@ def get_innerdf(data,maxsize,next_level):
 def get_innerhashs_small(df,maxsize,**kwargs):
 	next_level = False
 	innerbool = False
-	for key,value in kwargs.iteritems():
+	for key,value in kwargs.items():
 		if key == 'next_level':
 			next_level = value
 		if key == 'innerbool':
@@ -487,18 +486,6 @@ def make_unique_down(uniquegeohashlist):
 			newhash = currenthash + row
 			totalhashs.append(newhash)
 	return totalhashs
-
-# checks thep oints
-def check_third_dim(totalhashs,alignmentdf,innerbool):
-	# getting dataframe for points
-	data = points_from_geohash(totalhashs)
-
-	# creating intersect df for alignment table
-	itable = get_intersect_table(alignmentdf)
-
-	# checking each point exhaustive
-	df = vert_line_test_exhaustive(data,itable,innerbool)
-	return pd.DataFrame(df['GEOHASH'].values,columns=['total'])
 
 # assembles the final outputs from a geohash df of inner small geohashs
 def assemble_outputs(unstackedinner,**kwargs):
@@ -668,7 +655,7 @@ def get_outer_inner(df,uniques):
 def get_innerring_tables(inner_rings,maxsize,**kwargs):
 	next_level = False
 	next_levels = []
-	for key,value in kwargs.iteritems():
+	for key,value in kwargs.items():
 		if key == 'next_level':
 			next_level = value
 
@@ -709,66 +696,11 @@ def filter_relevant_nextdim(data):
 	data = data[((data['total'].str.len()==highest-1)&(data['BOOL']==False))|(data['total'].str.len() == highest)|(data['total'].str.len() == highest-2)]
 	return data
 
-# when drilling down one more layer some data becomes invalidated
-# this is a few dataframe abstractions to get the correct geohashs out of the data
-def filter_lint_data3d(data,outeralignmentdf,rings):
-	# filter data from geohashs one layer above me
-	# its own alg itself basically
-	data = filter_relevant_nextdim(data)
-
-	# getting the maximum geohash sizze
-	highest = data['total'].str.len().max()
-	
-	# getting all the unique values at the highest leveel geohash with a string slice applied
-	temp = np.unique(data[(data['total'].str.len() == highest)]['total'].str[:-2]).tolist()
-
-	# doing an isin operation on the smallest size geohashs in our current layout 
-	# this bool does an is in about the list created above to create a slicing column
-	data['BOOL'] =data[data['total'].str.len()==highest-2]['total'].isin(temp)
-	data = data.fillna(value=False)
-
-	# getting all highest level (largest) geohashs that need to bel linted
-	b = data[data['BOOL'] == True]
-	
-
-	othervalues = data[data['BOOL'] == False]
-	othervalues = np.unique(othervalues['total']).tolist()
-	
-	# getting the unique geohashs extening them into a points dataframe 
-	# this dataframe will be compared against the outer rings as well as 
-	# the outer ring
-	uniquegeohashs = b['total'].values.tolist()
-	expandedgeohashs = make_unique_down(uniquegeohashs)
-	potpoints = points_from_geohash4(expandedgeohashs)
-
-	# creating intersect df for alignment table
-	itable = get_intersect_table(outeralignmentdf)
-
-	# checking each point exhaustive
-	df = vert_line_test_exhaustive(potpoints,itable,True)
-	totalgeohashs = np.unique(df['GEOHASH']).tolist()
-	for row in rings:
-
-		# creating intersect df for alignment table
-		itable = get_intersect_table(row)
-		df = vert_line_test_exhaustive(potpoints,itable,False)
-		totalgeohashs += np.unique(df['GEOHASH']).tolist()
-
-	# creating final bool for an isin statement about geohashs
-	potpoints['BOOL2'] = potpoints['GEOHASH'].isin(totalgeohashs)
-	potpoints = potpoints.fillna(value=False)
-	geohashsdesired = potpoints[potpoints['BOOL2'] == False]
-
-
-	totalhashs = np.unique(geohashsdesired['GEOHASH']).tolist() + othervalues
-
-	return pd.DataFrame(totalhashs,columns=['total'])
-
 # function for creatng an index of a single object with multiple ring levels
 # called from make_index
 def make_single_ring(outer_ring,inner_rings,**kwargs):
 	next_level = False
-	for key,value in kwargs.iteritems():
+	for key,value in kwargs.items():
 		if key == 'next_level':
 			next_level = value
 
@@ -826,7 +758,7 @@ def make_ring_index(data,printoff=False):
 
 		count += 1
 		if printoff == False:
-			print 'Rings within Area: [%s/%s] & Ring Time: %s' % (count,len(uniques),time.time()-s)
+			print('Rings within Area: [%s/%s] & Ring Time: %s' % (count,len(uniques),time.time()-s))
 	totals = pd.concat(totals)
 	return totals
 

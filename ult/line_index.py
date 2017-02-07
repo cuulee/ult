@@ -1,52 +1,39 @@
+import future
 import pandas as pd
 import numpy as np
-import itertools
 import geohash
+import simplejson as json
+from geohash_logic import get_slope,solve_xmin
+import os
 import time
-import json
-from pipegeohash import map_table,list2df,df2list
-from polygon_dict import merge_dicts
-from geohash_logic import *
+from multiprocessing import Process
+import random
 
-# gets the extrema dictionary of the alignment df
-def get_extrema(df):
-	if isinstance(df,list):
-		w = 1000
-		e = -1000
-		n = -1000
-		s = 1000
-		for long,lat,valid in df:
-			if long < w:
-				w = long
-			if long > e:
-				e = long
-			if lat > n:
-				n = lat
-			if lat < s:
-				s = lat
-		return {'n':n,'s':s,'e':e,'w':w}
 
-	# getting lat and long columns
-	for row in df.columns.values.tolist():
-		if 'lat' in str(row).lower():
-			latheader = str(row)
-		if 'lon' in str(row).lower():
-			longheader = str(row)
-	
-	# getting n,s,e,w extrema
-	south,north = df[latheader].min(),df[latheader].max()
-	west,east = df[longheader].min(),df[longheader].max()
+# given a point1 x,y and a point2 x,y returns distance in miles
+# points are given in long,lat geospatial cordinates
+def distance(point1,point2):
+	point1 = np.array(point1)
+	point2 = np.array(point2)
+	return np.linalg.norm(point1-point2)
 
-	# making dictionary for extrema
-	extrema = {'n':north,'s':south,'e':east,'w':west}
+def get_cords_json(coords):
+	data = '{"a":%s}' % coords
+	data = json.loads(data)	
+	return data['a']
 
-	return extrema
+def neighbors_func(ghash):
+	nei = geohash.neighbors(ghash)
+	return '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s' % (ghash,nei[0],ghash,nei[1],ghash,nei[2],ghash,nei[3],ghash,nei[4],ghash,nei[5],ghash,nei[6],ghash,nei[7])
+
 
 
 # returns a set of points that traverse the linear line between two points
 def generate_points_geohash(number_of_points,point1,point2,name,size,currentdist,maxdistance):
 	# getting x points
 	geohashlist = []
+	if number_of_points == 0:
+		return []
 
 	x1,x2 = point1[0],point2[0]
 	xdelta = (float(x2) - float(x1)) / float(number_of_points)
@@ -60,7 +47,7 @@ def generate_points_geohash(number_of_points,point1,point2,name,size,currentdist
 	geohashlist = ['GEOHASH',geohash.encode(y1,x1,size)]
 	pointdelta = (xdelta ** 2 + ydelta ** 2) ** .5
 	current = currentdist
-	stringlist = ['GEOHASH','%s,%s,%s,%s' % (g1,name,str(currentdist),str(maxdistance))]
+	stringlist = [[g1,'%s,%s,%s,%s' % (g1,name,str(currentdist),str(maxdistance))]]
 	count = 0
 	strmaxdistance = str(maxdistance)
 	while count < number_of_points:
@@ -70,30 +57,98 @@ def generate_points_geohash(number_of_points,point1,point2,name,size,currentdist
 		current += pointdelta
 		ghash = geohash.encode(ycurrent,xcurrent,size)
 		geohashlist.append(ghash)
-		stringlist.append('%s,%s,%s,%s' % (ghash,name,str(current),strmaxdistance))
+		stringlist.append([ghash,'%s,%s,%s,%s' % (ghash,name,str(current),strmaxdistance)])
 	geohashlist.append(geohash.encode(point2[1],point2[0],size))
 	lastdist = currentdist + distance(point1,point2)
 	g2 = geohash.encode(y2,x2,size)
 
-	stringlist.append('%s,%s,%s,%s' % (g2,name,str(lastdist),strmaxdistance))
-	
+	stringlist.append([g2,'%s,%s,%s,%s' % (g2,name,str(lastdist),strmaxdistance)])
 	indexs = np.unique(geohashlist,return_index=True)[1]
-	stringlist = [stringlist[i] for i in sorted(indexs)]
+	try:
+		stringlist = [stringlist[i] for i in sorted(indexs)]
+	except:
+		return []
 	return stringlist
 
-# given a point1 x,y and a point2 x,y returns distance in miles
-# points are given in long,lat geospatial cordinates
-def distance(point1,point2):
-	point1 = np.array(point1)
-	point2 = np.array(point2)
-	return np.linalg.norm(point1-point2)
+
+# function for writing a json ot to a file
+def make_json(dictionary,filename):
+	with open(filename,'wb') as f:
+		json.dump(dictionary,f)
+
+# function for reading json 
+def read_json(filename):
+	with open(filename,'rb') as f:
+		return json.load(f)
 
 
 
-def get_cords_json(coords):
-	data = '{"a":%s}' % coords.decode('utf-8') 
-	data = json.loads(data)	
-	return data['a']
+
+
+# hopefully a function can be made to properly make into lines
+def fill_geohashs(data,name,size,maxdistance,hashsize):
+	global ghashdict
+	# function for linting whether the first point and lastpoint are the same if not appends talbe
+
+	count = 0
+	geohashlist = []
+	tangslist = []
+	currentdist = 0.
+	neighbors = []
+	ghashdict = {}
+	dist = 0
+	ind = 0
+	for row in data:
+		if count == 0:
+			count = 1
+			geohashlist.append([geohash.encode(row[1],row[0],9),'%s,%s,%s,%s' % (geohash.encode(row[1],row[0],9),name,str(currentdist),str(maxdistance))])
+		else:
+			slope = get_slope(oldrow,row)
+			x1,y1 = oldrow
+			dist = distance(oldrow,row)
+			positions = solve_xmin(oldrow,row,size)
+
+			if dist > hashsize / 5.0 or ind == 0:
+				number = (dist / hashsize) * 5.0
+				number = int(number)				
+
+				if ind == 0 and not dist == 0 and not number > 10:
+					ind = 1
+					number = 10
+
+				addghashs = generate_points_geohash(number,oldrow,row,name,size,currentdist,maxdistance)[1:]
+
+				geohashlist += addghashs
+			else:
+				point = row
+				geohashlist.append([geohash.encode(point[1],point[0],9),'%s,%s,%s,%s' % (geohash.encode(point[1],point[0],9),name,str(currentdist),str(maxdistance))])
+
+			currentdist += dist
+
+		oldrow = row
+
+	return geohashlist
+
+
+
+# creates metadata dictionary for polygon h5 outputs
+# type is the output type
+# min and max is the size of polygon steps
+# size is the size of areamask
+def make_meta_lines(min,max,size,extrema):
+	return {'type':'lines','minsize':min,'maxsize':max,'size':size,'output_type':'single','extrema':extrema}
+
+# makes a line mask for the lineids of a given df
+def make_line_mask(data):
+	linemask1 = {}
+	linemask2 = {}
+	uniques = np.unique(data['gid']).tolist()
+	for i,unique in zip(range(len(uniques)),uniques):
+		key = i
+		linemask2[key] = unique
+		linemask1[unique] = key
+
+	return linemask1,linemask2
 
 # given a geohash list returns a list of geohashs with
 # the neighbors added to eachvalue
@@ -116,231 +171,348 @@ def make_neighbors(geohashlist,firstlast=False):
 	newlist = np.unique(newlist).tolist()
 	return newlist
 
+def merge_dicts(*dict_args):
+    '''
+    Given any number of dicts, shallow copy and merge into a new dict,
+    precedence goes to key value pairs in latter dicts.
+    '''
+    result = {}
+    size = len(dict_args)
+    count = 0
+    for dictionary in dict_args:
+        result.update(dictionary)
+        count += 1
+        print("[%s/%s]" % (count,size))
+    return result
 
-# hopefully a function can be made to properly make into lines
-def fill_geohashs(data,name,size,maxdistance):
-	global ghashdict
-	# function for linting whether the first point and lastpoint are the same if not appends talbe
-	hashsize = get_hashsize(data[0],size)
 
+# function that instantiates the make_line_index abstracton
+def helper_func(name,filename,split,appendsize):
+	make_line_index(name,filename,multiprocessing=True,split=split,appendsize=appendsize)
+	print('Split %s COMPLETE.' % split)
+
+# function for making multiple processes
+def make_processes(data,filename,number_of_processes,appendsize):
+	make_json({b'status':False},'ind.json')
+
+	# shuffling data to remove uneven split distances sometimes
+	data = data.sample(n=len(data))
+
+	with open(str.split(filename,'.')[0]+'.csv','wb') as b:
+		b.write(b'"GEOHASH","TEXT"')
+	extrema = []
 	count = 0
-	geohashlist = []
-	tangslist = []
-	currentdist = 0.
-	neighbors = []
-	ghashdict = {}
-	dist = 0
-	ind = 0
-	for row in data:
-		if count == 0:
-			count = 1
-			geohashlist.append('%s,%s,%s,%s' % (geohash.encode(row[1],row[0],9),name,str(currentdist),str(maxdistance)))
-		else:
-			slope = get_slope(oldrow,row)
-			x1,y1 = oldrow
-			dist = distance(oldrow,row)
-			positions = solve_xmin(oldrow,row,size)
-
-			if dist > hashsize / 5.0 or ind == 0:
-				number = (dist / hashsize) * 5.0
-				number = int(number)				
-
-				if ind == 0 and not dist == 0 and not number > 10:
-					ind = 1
-					number = 10
-
-				addghashs = generate_points_geohash(number,oldrow,row,name,size,currentdist,maxdistance)[1:]
-
-				geohashlist += addghashs
-			else:
-				point = row
-				geohashlist.append('%s,%s,%s,%s' % (geohash.encode(point[1],point[0],9),name,str(currentdist),str(maxdistance)))
-
-			currentdist += dist
-
-		oldrow = row
-
-	return geohashlist
-
-
-# making flat list non sorted
-def flatten_nonsorted(data):
-	ghashs = data['GEOHASH']
-	indexes = np.unique(ghashs, return_index=True)[1]
-	list = [ghashs[index] for index in sorted(indexes)]
-	return list	
-
-# makes a line mask for the lineids of a given df
-def make_line_mask(data):
-	linemask1 = {}
-	linemask2 = {}
-	uniques = np.unique(data['gid']).tolist()
-	for i,unique in itertools.izip(range(len(uniques)),uniques):
-		key = i
-		linemask2[key] = unique
-		linemask1[unique] = key
-
-	return linemask1,linemask2
-
-# encoding geeohash neighborsas as a string
-def map_geohash_neighbors(ghash):
-	return '|'.join(['%s,%s' % (ghash,i) for i in geohash.neighbors(ghash)])
-
-
-# creates metadata dictionary for polygon h5 outputs
-# type is the output type
-# min and max is the size of polygon steps
-# size is the size of areamask
-def make_meta_lines(min,max,size):
-	return {'type':'lines','minsize':min,'maxsize':max,'size':size,'output_type':'single'}
-
-
-# making line segment index
-def make_line_index(data,outfilename,**kwargs):
-	data1 = data
-	uniqueid = False
-	filename = False
-	return_index = False
-	precision = 9
-	benchmark = False
-	for key,value in kwargs.iteritems():
-		if key == 'uniqueid':
-			uniqueid = value
-		if key == 'precision':
-			precision = value
-		if key == 'benchmark':
-			benchmark = value
-		if key == 'return_index':
-			return_index = value
-
-	if uniqueid == False:
-		uniqueidheader = 'gid'
-	else:
-		uniqueidheader = uniqueid
-	if filename == False:
-		filename = 'line_index.csv'
-
-	# logic for whether or not the maxdistance
-	# has to be derived or can it be infered from a columnfield
-	maxbool = False
-	for row in data.columns.values.tolist():
-		if str(row).lower() == 'maxdistance':
-			maxbool = True
-
-	# logic for getting the dataframe needed to create the 
-	# distance dictionary
-	if maxbool == True:
-		dicttable = data.set_index('gid')
-		segdistance = dicttable['maxdistance'].to_dict()
-
-	# getting header and intializing
-	header = data.columns.values.tolist()
-	totalgeohashs = []
-	totalids = []
- 	count = 0
- 	total = 0
- 	# getting unique column position
- 	for row in header:
- 		#if headercolumn in str(row):
- 		#	position = count
- 		row = row.encode('utf-8')
- 		if uniqueidheader in str(row):
- 			uniqueidrow = count
- 		count += 1
-
-
- 	starttime = time.time()
- 	linemask1,linemask2 = make_line_mask(data)
-
- 	count = 0
- 	geohashlist = []
- 	neighbors = []
-
- 	# collecing all the alignment geohashs
- 	for coords,row in itertools.izip(data['coords'].map(get_cords_json).values.tolist(),data.values.tolist()):
-		name = row[uniqueidrow]
-		maxdistance = segdistance[int(name)]
-		addgeohashs = fill_geohashs(coords,name,precision,maxdistance)
-		geohashlist += addgeohashs
-		if count == 1000:
-			total += count
-			count = 0
-			#print '[%s / %s]' % (total,len(data))
-
+	processes = []
+	for i in np.array_split(data,number_of_processes):
 		count += 1
+		p = Process(target=helper_func,args=(i,filename,count,appendsize))
+		p.start()
+		print 'Started Process %s' % count
+		processes.append(p)
 
-	endloop = time.time() - starttime
-
-	startdftime = time.time()
-	s = time.time()
-	count = 0
-	aligndicts = []
-	dict2s = []
-
-	# construction of the neighboring goehashs
-	# iterating through each secton of the large dataframe were splitting up
-	for aligns in np.array_split(pd.DataFrame(geohashlist,columns=['TEXT']),20):
-		count+= 1
-
-		# getting geohshs
-		aligns['GEOHASH'] = aligns['TEXT'].str[:9]
-	
-		#aligns['value'] = aligns[['LINEID','DISTANCE','PERCENT']].values.tolist()
-		aligns['NEIGHBORS'] = aligns['GEOHASH'].map(map_geohash_neighbors)
-		
-		# aggregating text
-		aligns['a'] = 'a'
-		totalneighbors = aligns.groupby('a')['NEIGHBORS'].apply(lambda x: "%s" % '|'.join(x))['a']
-		totalneighbors = pd.DataFrame([i for i in str.split(totalneighbors,'|')],columns=['TEXT'])
-
-		# slicing the text field to get the appropriate geohashs
-		totalneighbors['INNERGEOHASH'],totalneighbors['NEIGHBORS'] = totalneighbors['TEXT'].str[:9],totalneighbors['TEXT'].str[10:]
-
-		# gettin gthe aligns dict
-		alignsdict = aligns.set_index('GEOHASH')['TEXT'].str[10:].to_dict()
-
-		# mapping the text to the neighboriing geohashs
-		totalneighbors['TEXT'] = totalneighbors['INNERGEOHASH'].map(lambda x:alignsdict[x])
-		dict2 = totalneighbors.set_index('NEIGHBORS')['TEXT'].to_dict()
-		aligndicts.append(alignsdict)
-		dict2s.append(dict2)
-	
-
-	# mering both dictionaries.
-	ultindex = merge_dicts(*dict2s+aligndicts)
+	# loop until all processes are done
+	ind=True
+	while ind == True:
+		time.sleep(1)
+		runind = True
+		for i in processes:
+			status = i.is_alive()
+			if status == True:
+				runind = False
+		if runind == True:
+			ind = False
 
 
-	enddftime = time.time() - startdftime
 
-	if return_index == True:
-		data = pd.DataFrame(ultindex.items(),columns=['GEOHASH','TEXT'])
-		data[['gid','DISTANCE','MAXDISTANCE']] = data['TEXT'].str.split(',',expand=True)
-		data['gid'] = data['gid'].astype(float).astype(int)
-		output = data.groupby('gid')['GEOHASH'].apply(lambda x: "%s" % ','.join(x)).reset_index()[['gid','GEOHASH']]
-		output['TEXT'] = data.groupby('gid')['TEXT'].apply(lambda x: "%s" % '|'.join(x)).reset_index()['TEXT']
-		return output,output['gid'].values.tolist()
+	# making lines mask for no reason
+	linemask1,linemask2 = make_line_mask(data)
+
 	# make line index metadata
-	metadata = make_meta_lines(8,9,len(segdistance))
-	df = pd.DataFrame([json.dumps(ultindex),json.dumps(linemask2),json.dumps(metadata)],index=['ultindex','areamask','metadata'])
+	metadata = make_meta_lines(8,9,len(data),extrema)
+	df = pd.DataFrame(['stringdf',json.dumps(linemask2),json.dumps(metadata)],index=['ultindex','areamask','metadata'])
+
 	# writing output to h5 file
-	if benchmark == False:
-		with pd.HDFStore(outfilename) as out:
+	if not filename == False:
+		with pd.HDFStore(filename) as out:
 			out['combined'] = df
 			out['alignmentdf'] = data
 
-	print 'Made output h5 file containing datastructures:'
-	print '\t- alignmentdf (type: pd.DataFrame)'
-	print '\t- areamask (type: dict)'
-	print '\t- ultindex (type: dict)'
-	print '\t- metadata (type: dict)'
 
 
-	totaltime = time.time() - starttime
 
-	return pd.DataFrame([['looptime',endloop],
-						['df time',enddftime],
-						['totaltime',totaltime]],
-						columns = ['FIELD','TIME'])
+
+
+
+def make_line_index(data,h5filename,multiprocessing=False,split=1,processes=1,appendsize=5000):
+	if not processes == 1:
+		multiprocessing = True
+		print('Creating multiple processes.')
+		make_processes(data,h5filename,processes,appendsize)
+		return []
+
+
+
+	try:
+		os.remove(h5filename)
+	except:
+		pass
+
+	gidbool = False
+	# checking to see if gid exists
+	for row in data.columns:
+		if row == 'gid':
+			gidbool = True
+
+	coordbool = False
+	# checking to see if gid exists
+	for row in data.columns:
+		if row.lower() == 'coords':
+			coordbool = True
+			coordheader = row
+
+
+	# getting maxdistance if applicable
+	maxdistance = False
+	for i in data.columns:
+		if 'maxdistance' in str(i).lower():
+			maxdistanceheader = i
+			maxdistancebool = True
+
+
+	# logic for zipping together right obects
+	if gidbool == True:
+		iterdata = data[['gid',coordheader,maxdistanceheader]].values
+	else:
+		iterdata = zip(range(len(data)),data[coordheader],data[maxdistanceheader])
+
+
+	# retriving the sise of 1 geohash
+	firstpoint = get_cords_json(data[coordheader].values[0])[0]
+	lat,long,latdelta,longdelta = geohash.decode_exactly(geohash.encode(firstpoint[1],firstpoint[0],9))
+	ghashsize = ((latdelta*2)**2 + (longdelta*2)**2) ** .5
+
+	# checking for cardinal coords and getting extrema if applicable
+	ind = 0
+	for row in data.columns:
+		if 'north' in str(row).lower():
+			nhead = row
+			ind += 1
+		if 'south' in str(row).lower():
+			shead  = row
+			ind += 1
+		if 'east' in str(row).lower():
+			ehead = row
+			ind += 1
+		if 'west' in str(row).lower():
+			whead  = row
+			ind += 1
+
+	# logic for getting the extrema
+	if ind == 4:
+		extrema = { 'n':data[nhead].max(),
+		  's':data[shead].min(),
+		  'w':data[whead].min(),
+		  'e':data[ehead].max()}
+	else:
+		extrema = []
+
+
+	size = len(data)
+	addgeohashs = []
+	total = 0
+	count = 0
+	msgsize = 0
+	jsonfilename = str.split(h5filename,'.')[0] + '.csv'
+
+
+
+	for gid,coords,maxdistance in iterdata:
+		coords = get_cords_json(coords)
+		addgeohashs += fill_geohashs(coords,gid,9,maxdistance,ghashsize)
+		count += 1
+		if count == appendsize:
+			count = 0
+			total += appendsize
+			aligns = pd.DataFrame(addgeohashs,columns=['GEOHASH','TEXT'])
+			
+
+			print('Process %s: [%s/%s] dfsize created: %s' % (split,total,size,len(addgeohashs)))
+			
+
+			addgeohashs = []
+			msgsize += 1
+			#aligns['value'] = aligns[['LINEID','DISTANCE','PERCENT']].values.tolist()
+			#aligns['NEIGHBORS'] = aligns['GEOHASH'].map(lambda x:'|'.join(['%s,%s' % (x,i) for i in geohash.neighbors(x)]))
+			aligns = aligns.loc[np.unique(aligns['GEOHASH'],return_index=True)[1]]
+			#aligns['GEOHASH'] = aligns.index
+
+			# aggregating text
+			aligns['a'] = 'a'
+			#totalneighbors = aligns.groupby('a')['GEOHASH'].apply(lambda x: '|'.join(['|'.join(['|'.join(['%s,%s' % (ii,i) for i in geohash.neighbors(ii)])]) for ii in x.values]))['a']
+			totalneighbors = pd.DataFrame(str.split(aligns.groupby('a')['GEOHASH'].apply(lambda x: '|'.join(['|'.join(['|'.join(['%s,%s' % (ii,i) for i in geohash.neighbors(ii)])]) for ii in x.values]))['a'],'|'),columns=['TEXT'])
+
+			# slicing the text field to get the appropriate geohashs
+			totalneighbors['NEIGHBORS'] = totalneighbors['TEXT'].str[10:]
+
+			# doing total neighbors
+			totalneighbors = totalneighbors.loc[np.unique(totalneighbors['NEIGHBORS'],return_index=True)[1]]
+
+			# mapping the text to the neighboriing geohashs
+			totalneighbors['TEXT'] = aligns.set_index('GEOHASH').loc[totalneighbors['TEXT'].str[:9]]['TEXT'].values
+			#totalneighbors = totalneighbors.groupby('NEIGHBORS').first()
+			#totalneighbors = totalneighbors['TEXT'].to_json(orient='index')
+			#print(totalneighbors[['NEIGHBORS','TEXT']].to_csv(index=False,header=False,mode=str)+'\n'+aligns[['GEOHASH','TEXT']].to_csv(index=False,header=False,mode=str))
+			ind = 0
+			while ind == 0:
+				try:
+					status = read_json('ind.json')['status']
+				except:
+					status = True
+				if status == False:
+					make_json({b'status':True},'ind.json')
+					with open(jsonfilename,'a') as f:
+						f.write('\n'+totalneighbors[['NEIGHBORS','TEXT']].to_csv(index=False,header=False,mode=str)+'\n'+aligns[['GEOHASH','TEXT']].to_csv(index=False,header=False,mode=str))	
+					ind = 1
+				else:
+					time.sleep(random.uniform(0.5,2.5))
+			make_json({b'status':False},'ind.json')
+
+
+	
+	if not count == 0:
+		aligns = pd.DataFrame(addgeohashs,columns=['GEOHASH','TEXT'])
+		print('Process %s: [%s/%s] dfsize created: %s' % (split,total,size,len(addgeohashs)))
+		addgeohashs = []
+		msgsize += 1
+		#aligns['value'] = aligns[['LINEID','DISTANCE','PERCENT']].values.tolist()
+		#aligns['NEIGHBORS'] = aligns['GEOHASH'].map(lambda x:'|'.join(['%s,%s' % (x,i) for i in geohash.neighbors(x)]))
+		aligns = aligns.loc[np.unique(aligns['GEOHASH'],return_index=True)[1]]
+		#aligns['GEOHASH'] = aligns.index
+
+		# aggregating text
+		aligns['a'] = 'a'
+		#totalneighbors = aligns.groupby('a')['GEOHASH'].apply(lambda x: '|'.join(['|'.join(['|'.join(['%s,%s' % (ii,i) for i in geohash.neighbors(ii)])]) for ii in x.values]))['a']
+		totalneighbors = pd.DataFrame(str.split(aligns.groupby('a')['GEOHASH'].apply(lambda x: '|'.join(['|'.join(['|'.join(['%s,%s' % (ii,i) for i in geohash.neighbors(ii)])]) for ii in x.values]))['a'],'|'),columns=['TEXT'])
+
+		# slicing the text field to get the appropriate geohashs
+		totalneighbors['NEIGHBORS'] = totalneighbors['TEXT'].str[10:]
+
+		# doing total neighbors
+		totalneighbors = totalneighbors.loc[np.unique(totalneighbors['NEIGHBORS'],return_index=True)[1]]
+
+		# mapping the text to the neighboriing geohashs
+		totalneighbors['TEXT'] = aligns.set_index('GEOHASH').loc[totalneighbors['TEXT'].str[:9]]['TEXT'].values
+		#totalneighbors = totalneighbors.groupby('NEIGHBORS').first()
+		#totalneighbors = totalneighbors['TEXT'].to_json(orient='index')
+		#print(totalneighbors[['NEIGHBORS','TEXT']].to_csv(index=False,header=False,mode=str)+'\n'+aligns[['GEOHASH','TEXT']].to_csv(index=False,header=False,mode=str))
+		ind = 0
+		while ind == 0:
+			time.sleep(1)
+			try:
+				status = read_json('ind.json')['status']
+			except:
+				status = True
+			if status == False:
+				make_json({b'status':True},'ind.json')
+				with open(jsonfilename,'a') as f:
+					f.write('\n'+totalneighbors[['NEIGHBORS','TEXT']].to_csv(index=False,header=False,mode=str)+'\n'+aligns[['GEOHASH','TEXT']].to_csv(index=False,header=False,mode=str))	
+				ind = 1
+			else:
+				time.sleep(random.uniform(0.5,2.5))
+
+		make_json({b'status':False},'ind.json')
+
+
+	if multiprocessing == False:
+		# making lines mask for no reason
+		linemask1,linemask2 = make_line_mask(data)
+
+		# make line index metadata
+		metadata = make_meta_lines(8,9,len(data),extrema)
+		df = pd.DataFrame(['stringdf',json.dumps(linemask2),json.dumps(metadata)],index=['ultindex','areamask','metadata'])
+		
+		# writing output to h5 file
+		if not h5filename == False:
+			with pd.HDFStore(h5filename) as out:
+				out['combined'] = df
+				out['alignmentdf'] = data
+
+
+		print('Made output h5 file containing datastructures:')
+		print('\t- alignmentdf (type: pd.DataFrame)')
+		print('\t- areamask (type: dict)')
+		print('\t- ultindex (type: dict)')
+		print('\t- metadata (type: dict)')
+
+
+# for a given set of coordinates 
+# iterates through each set of points in a line
+# and windows through grabbing midpoints on the way
+def expand_out(coords,hashsize,name,maxdistance):	
+	# setting initial distance
+	dist = 0.
+
+	# lines
+	lats = []
+	longs = []
+	dists = []
+
+	count = 0
+	for long,lat in coords:
+		if count == 0:
+			count = 1
+		else:
+			# getting distance about two points
+			dist = dist + distance([oldlong,oldlat],[long,lat])
+			
+			# getting the number points to iterate through
+			number = (int(dist / hashsize) *2) + 2
+			if count == 1:
+				count = 2
+			
+			ptlats = np.linspace(oldlat,lat,number)
+			ptlongs = np.linspace(oldlong,long,number)
+			distances = np.linspace(old_dist,dist,number)
+			
+			# appending all the outerlist additions
+			lats.append(ptlats)
+			longs.append(ptlongs)
+			dists.append(distances)
+		oldlong,oldlat,old_dist = long,lat,dist
+	
+	lats,longs,dists = np.concatenate(tuple(lats)),np.concatenate(tuple(longs)),np.concatenate(tuple(dists))
+			
+	my_func = np.vectorize(geohash.encode,excluded=['precision'])
+	ghashs = my_func(latitude=lats,longitude=longs,precision=9)
+
+
+	# getting unique indicies
+	indexes = np.unique(ghashs, return_index=True)[1]
+	ghashs = np.column_stack((lats,longs,dists,ghashs))
+	ghashs = [ghashs[index] for index in sorted(indexes)]
+	
+	return [[i[-1],'%s,%s,%s,%s' % (i[-1],name,i[-2],maxdistance)] for i in ghashs]
+
+# maps the points and distances about a gien
+# ultindex output (i.e. adds distance and lineid columns)
+# this is the mainline usage function for this module
+def line_index(data,index):
+	global ultindex
+	global areamask
+	ultindex = index['ultindex']
+	areamask = index['areamask']
+	
+	# the following apply method retrieves 
+	# lineids and distances if available 
+	# then is wrapped to retrieve the value in areamask
+	# for the lineid values
+	data['TEXT'] = data['GEOHASH'].str[:9].map(lambda x:ultindex.get(x,''))
+	return data
+
+def make_line_indexdf(index):
+	data = pd.DataFrame(index['ultindex'].items(),columns=['GEOHASH','AREA'])
+	data[['OLDGEOHASH','LINEID','DISTANCE','MAXDISTANCE']] = data['AREA'].str.split(',',expand=True)
+	return data
 
 # for a set of a cordinates gets the max distance
 def get_max_distance(coords):
@@ -355,318 +527,42 @@ def get_max_distance(coords):
 		oldpoint = point
 	return totaldistance
 
-# gets a max distance table that will either
-# be added to a db or made into a dictionary
-def make_max_distance(data):
-	from nlgeojson import get_coordstring
-	cordbool = False
-	for row in data.columns.values.tolist():
-		if 'coords' == row:
-			cordbool = True
-	if cordbool == True:
-		cordheader = 'coords'
-	else:
-		cordheader = 'st_asewkt'
+'''
+import mapkit as mk
+import pandas as pd
+import time
+from ult.polygon_dict import get_filetype
+for i in get_filetype('csv','csv')[1:]:
+	filename = i
+	#data = mk.get_database('routes')
+	data = pd.read_csv(i)
 	newlist = []
-	for gid,coords in data[['gid',cordheader]].values.tolist():
-		if cordbool == True:
-			coords = get_cords_json(coords)		
-		else:
-			coords = get_coordstring(coords)
-		maxdistance = get_max_distance(coords)
-		newlist.append([gid,maxdistance])
+	if not len(data) == 0:
+		for i in data['osmid']:
+			if '[' == i[0] and ']' == i[-1]:
+				i = sum([int(i) for i in str.split(i[1:-1],',')])
+			newlist.append(i)
 
-	return pd.DataFrame(newlist,columns=['gid','MAXDISTANCE'])
+		data['gid'] = newlist
+		data['LINEID'] = newlist
+		newlist = []
+		for i in data['coords'].values:
+			newlist.append(get_max_distance(get_cords_json(i)))
+		data['maxdistance'] = newlist
 
+		data.to_csv('new/' + str.split(str(filename),'/')[1],index=False)
+		s = time.time()
+		make_line_index(data,'la.h5',processes=8,appendsize=250)
+		print(time.time() - s)
 
+		data = pd.read_csv('la.csv',error_bad_lines=False)
+		print data
+		data['LINEID'] = data.TEXT.str.split(',').str[1]
+		mk.make_map([mk.make_colorkey(data,'LINEID')[['GEOHASH','COLORKEY']],'blocks'])
+		time.sleep(15)
+#mk.make_map([[alignmentdf,'blocks'],[blocks,'blocks']])
 
-# maps the points and distances about a gien
-# ultindex output (i.e. adds distance and lineid columns)
-# this is the mainline usage function for this module
-def line_index(data,index):
-	global ultindex
-	global areamask
-	ultindex = index['ultindex']
-	areamask = index['areamask']
-	# the following apply method retrieves 
-	# lineids and distances if available 
-	# then is wrapped to retrieve the value in areamask
-	# for the lineid values
-	data['TEXT'] = data['GEOHASH'].str[:9].map(lambda x:ultindex.get(x,''))
-	return data
-
-# makes a line index test block similiar to make
-# testblock from polygon_index
-def make_line_test(ultindex,number):
-	from pipegeohash import random_points_extrema
-	extrema = {'n':36.0841,'s':33.069241,'e':-120.25172,'w':-117.22172}
-	data = random_points_extrema(number,extrema)
-	data = map_table(data,12,map_only=True)
-	data = line_index(data,ultindex)
-	data = data[data['TEXT'].astype(str).str.len() > 0]
-	return data
-
-def applyfunc(array):
-	return len(np.unique(array))
-
-# the (old) mapped function
-def one_line_index(ghash):
-	global ultindex
-	global areamask
-	size = 8
-	ind = 0 
-	while ind == 0:
-		current = ultindex.get(ghash[:size],'')
-
-		if current == '' and size == 9:
-			#print ultindex.get(ghash[:8]+'_u','')
-			return areamask.get(ultindex.get(ghash[:8]+'_u',''),'')
-
-		elif current == 'na':
-			size += 1
-		elif current == '':
-			return ''
-		else:
-			return areamask.get(current,'')
-
-# splits the output returned from line_index
-def split_text_output(df):
-	from mapkit import make_colorkey
-	df[['LINEID','DISTANCE','MAXDIST']] = df['TEXT'].astype(str).str.split(',',expand=True).astype(float)
-	df['PERCENT'] = (df['DISTANCE'] / df['MAXDIST'])	* 100.
-	return make_colorkey(df,'PERCENT',numeric=True,linear=True)
-
-
-def df_from_ultindex(ultindex):
-	return pd.DataFrame(ultindex['ultindex'].items(),
-		columns = ['GEOHASH','TEXT'])
-def index_df(ultindex):
-	df = df_from_ultindex(ultindex)
-	return split_text_output(df)
-
-def return_id_distance(x):
-	a = areamask.get(ultindex['LINEID'].get(x[:9],''),'')
-	b = ultindex['DISTANCE'].get(x[:9],'')
-	return a,b
-
-
-
-def add_columns_dbname(dbname,columns,indexcol='gid'):
-	string = "dbname=%s user=postgres password=secret" % (dbname)
-	conn = psycopg2.connect(string)
-	cursor = conn.cursor()
-	stringbools = []
-	count = 0
-	for column in columns:
-		if count == 0:
-			count = 1
-			query = "alter table %s add column %s text" % (dbname,column)	
-			stringbools.append(True)
-		else:
-			query = "alter table %s add column %s float" % (dbname,column)	
-			stringbools.append(False)
-		try:
-			cursor.execute(query)
-		except:
-			conn = psycopg2.connect(string)
-			cursor = conn.cursor()
-	conn.commit()
-
-
-
-# given point data and an index returns 
-# the blocks dataframe
-# the points dataframe
-# and the lines dataframe
-# for the given set of data and given ultindex h5 output
-# returns the configuration for output to pipegls
-def make_all_types_lines(pointdata,index,noblocks=False,nopointdata=False):
-	from mapkit import make_color_mask,unique_groupby
-	hashbool = False
-	linebool = False
-	if not noblocks == True:
-		values = [[i[0],index['areamask'][i[1][0]]] for i in index['ultindex'].items()]
-		blocks = pd.DataFrame(values,columns=['GEOHASH','LINEID'])
-		blocks = make_color_mask(pointdata,blocks,'LINEID','LINEID')
-		#dictcolor = blocks.groupby(['COLORKEY','LINEID']).first().reset_index()
-		#dictcolor = blocks.set_index('LINEID')['COLORKEY'].to_dict()	
-		#blocks,dictcolor = get_geohashs_fromindex(index)
-	if nopointdata == False:
-		for row in pointdata.columns.values.tolist():
-			if row == 'LINEID':
-				linebool = True
-			if row == 'GEOHASH':
-				hashbool = True
-		if hashbool == False:
-			pointdata = map_table(pointdata,12,map_only=True)
-			hashbool = True
-		if hashbool == True and linebool == False:
-			pointdata = line_index(pointdata,index)
-
-		# adding colorkeys to point data
-		#pointdata = pointdata[pointdata.LINEID.astype(str).str.len() > 0]
-		#pointdata['COLORKEY'] = pointdata['LINEID'].map(lambda x:colordict[x])
-	
-	# creating lines and adding colorkeys
-	lines = index['alignmentdf']
-	if nopointdata == True:
-		lines = make_color_mask(blocks,lines,'LINEID','gid')
-	else:
-		lines = make_color_mask(pointdata,lines,'LINEID','gid')
-
-	return make_all_configs(pointdata,lines,blocks,noblocks=noblocks,nopointdata=nopointdata)
-
-# makes all the configuration files for a given set of data structures
-def make_all_configs(points,lines,blocks,noblocks=False,nopointdata=False):
-	from pipegls import make_config
-	a = []
-	a = make_config(points,'points')
-	a = make_config(lines,'lines',current=a)
-	a = make_config(blocks,'blocks',current=a)
-	return a
-
-
-################################################################################
-
-# gets the values for geohash1 size 
-# that correspond to multiple lines within an upper level block
-def get_multiple_uniques(data):
-	grouped = data.groupby('GEOHASH1').AREA.nunique()
-	grouped = grouped.reset_index()
-	grouped.columns = ['GEOHASH1','COUNT']
-	grouped = grouped[grouped.COUNT > 1]
-	return grouped['GEOHASH1']
-
-# applies the is in statement on data
-# and then returns 2 dfs
-def separate_data(data,multipleuniques):
-	data['BOOL'] = data['GEOHASH1'].isin(multipleuniques)
-	
-	# getting the multiple df
-	multipledf = data[data['BOOL'] == True]
-
-	# getting the single df
-	singledf = data[data['BOOL'] == False]
-
-	return singledf,multipledf
-
-# given the multipledf returns a list of all
-# returns the list containing the dominant ['geohash1','area'] pairs
-def get_dominant_unique(multipledf):
-	countdf = multipledf[['GEOHASH','GEOHASH1','AREA']].groupby(['GEOHASH1','AREA']).count()
-	countdf = countdf.reset_index()
-	countdf.columns = ['GEOHASH1','LINEID','COUNT']
-	countdf = countdf.sort(['LINEID','COUNT'],ascending=[1,0])
-	countdf = countdf.groupby('GEOHASH1').first().reset_index()
-	countdf['TEXT'] = countdf['GEOHASH1'] + ',' + countdf['LINEID']
-	return countdf['TEXT']
-
-# this function takes data and the dominant field generated
-# and doesan isin statement returning two dfs
-# one containg a df that will be made into '_u':dominant
-# the other that will be made into the level 9 lowest level dict
-def separate_dominant(multipleuniques,dominantfield):
-	# creating the text field taht will be compared against the dominant
-	# field array
-	multipleuniques['TEXT'] = multipleuniques['GEOHASH1'] + ',' + multipleuniques['AREA']
-
-	# creating the bool via the isin statement
-	multipleuniques['BOOL'] = multipleuniques['TEXT'].isin(dominantfield)
-
-	# getting the dominant df
-	dominantdf = multipleuniques[multipleuniques['BOOL'] == True]
-
-	# getting the single df
-	applieddf = multipleuniques[multipleuniques['BOOL'] == False]
-
-	return dominantdf,applieddf
-
-# creates the dictionary for dominant values
-# from the dominantdf adding a '_u' to the geohash1
-def create_dominant_dict(dominantdf):
-	dominantdf['GEOHASH1'] = dominantdf['GEOHASH1'] + '_u'
-	return dominantdf.set_index('GEOHASH1')['AREA'].to_dict()
-
-# creates the level 8 mask:'na' dictionary from 
-# from the multipledf file (NOT THE SPLIT)
-# because all values in the multipledf need a mask
-def create_multiple_namask(multipledf):
-	uniquemultiples = np.unique(multipledf['GEOHASH1']).tolist()
-	return dict(zip(uniquemultiples,len(uniquemultiples)*['na']))
-
-# creating the single dictionary
-def create_single_dict(singledf):
-	return singledf.set_index('GEOHASH1')['AREA'].to_dict()
-
-
-def make_neighbors_map(mult):
-	area,ghashint = str.split(mult,',')
-	ghashs = geohash.neighbors(ghashint)
-	ghashs = ['%s,%s' % (ghash,area) for ghash in ghashs if ghash[:8] == ghashint[:8]]
-	return '|'.join(ghashs)
-
-
-# this operation creates the lower line dictionary
-# this dictionary returned will be the highest in merge list
-# i.e. lowerest priority
-def create_applied_neighbors_dict(applydf):
-	ghashs = []
-	applydf['MULT'] = applydf['AREA'] + ',' + applydf['GEOHASH']
-	s = time.time()
-	applydf['GEOHASHS'] = applydf['MULT'].map(make_neighbors_map)
-	print time.time() - s,'first'
-	s = time.time()	
-	#holder = applydf.groupby(['AREA','GEOHASH1'])['GEOHASHS'].apply(lambda x: "%s" % '|'.join(x))
-	#holder = holder.reset_index()
-	applydf['A'] = 'a'
-	holder = applydf.groupby('A')['GEOHASHS'].apply(lambda x: "%s" % '|'.join(x))
-	holder = holder.loc['a']
-	del applydf
-	holder = [str.split(i,',') for i in str.split(holder,'|')]
-	#holder = pd.DataFrame(holder,columns = ['TEXT'])
-	#holder2 = holder['TEXT'].str.split(',',expand=True)
-	print time.time() - s,'second'
-	holder = pd.DataFrame(holder,columns=['GEOHASH','AREA'])
-	return holder.set_index('GEOHASH')['AREA'].to_dict()
-
-
-def create_ultindex(data):
-	# creating geohash1 size on df
-	data['GEOHASH1'] = data['GEOHASH'].str[:8]
-
-	# selecting the geohash1s with multiple lines within them
-	multipleuniques = get_multiple_uniques(data)
-
-	# creating multipledf and singledf 
-	singledf,multipledf = separate_data(data,multipleuniques)
-
-	# single df contains or needs just a flat dictionary
-	# while multiple df needs
-	# {'g8':'na'},{'g8_u':dominantunique},{level 9 alone},{level 9 neighbors}
-	# make sure level 9 alone is last
-	dominantuniques = get_dominant_unique(multipledf)
-
-	# separating dominant
-	# the dominant df is '_u':dominantid
-	# the applied is level 9 on alignments and neighbors
-	dominantdf,applydf = separate_dominant(multipledf,dominantuniques)
-
-	# creating the nadict dictionary
-	nadict = create_multiple_namask(multipledf)
-
-	# creating the dominant dict 
-	dominantdict = create_dominant_dict(dominantdf)
-
-	# creating the single dict
-	singledict = create_single_dict(singledf)
-
-	# creating applieddictneighbors
-	appliedneighdict = create_applied_neighbors_dict(applydf)
-
-	# creating the applydf by itself
-	applydict = applydf.set_index('GEOHASH')['AREA'].to_dict()
-
-	# merging dictionaries and creating ultindex
-	ultindex = merge_dicts(*[nadict,dominantdict,singledict,appliedneighdict,applydict])
-
-	return ultindex
+mk.cln()
+mk.make_map(alignmentdf,'')
+mk.a()
+'''

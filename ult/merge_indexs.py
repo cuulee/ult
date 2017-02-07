@@ -2,8 +2,9 @@ import pandas as pd
 import time
 import itertools
 import simplejson as json
-from polygon_dict import make_json_string,reduce_to_min,area_index
+from .polygon_dict import make_json_string,reduce_to_min,area_index
 import numpy as np
+import future
 
 def get_df(index):
 	return pd.DataFrame(index['ultindex'].items(),columns=['GEOHASH','AREA'])
@@ -70,16 +71,16 @@ def combine_indexs(fileslist,fieldlist,filename):
 	# getting teh base dataframe
 	basedf = get_df(baseindex)
 	basedf[str(basefield)] = basedf['AREA']
-	print '[1/6] Created base dataframe'
+	print('[1/6] Created base dataframe')
 	
 	# slicing data to remove upper hierarchies
 	upperdf = basedf[basedf['AREA'] == -1]
 	basedf = basedf[basedf['AREA'] != -1]
 
 	# iterating through each remaining index and adding the appopriate field
-	for index,header in itertools.izip(indexs,fieldlist):
+	for index,header in zip(indexs,fieldlist):
 		basedf = area_index(basedf,index,column=header,dummyoutput=True)
-	print '[2/6] Completed initial index'
+	print('[2/6] Completed initial index')
 	
 	# doing one layer of correction 
 	here = drill_lower(basedf,fieldlist)
@@ -92,7 +93,7 @@ def combine_indexs(fileslist,fieldlist,filename):
 		else:
 			here = drill_lower(here,fieldlist)
 
-		for index,header in itertools.izip(indexs,fieldlist):
+		for index,header in zip(indexs,fieldlist):
 			here = area_index(here,index,column=header,dummyoutput=True)
 		d = here.fillna(value=-10000)
 		a = d[(d['DIST_AREA']==-10000)|(d['STATES_AREA']==-10000)]
@@ -102,12 +103,12 @@ def combine_indexs(fileslist,fieldlist,filename):
 		count += 1
 	'''
 
-	for index,header in itertools.izip(indexs,fieldlist):
+	for index,header in zip(indexs,fieldlist):
 		here = area_index(here,index,column=header,dummyoutput=True)
 	#d = here.fillna(value=-10000)
 	#a = d[(d['DIST_AREA']==-10000)|(d['STATES_AREA']==-10000)]
 	here = here.fillna(value=-10000)
-	print '[3/6] Completed drill correction'
+	print ('[3/6] Completed drill correction')
 
 	# slicing the tmepf frame for each field
 	newlist = []
@@ -116,7 +117,7 @@ def combine_indexs(fileslist,fieldlist,filename):
 		newlist.append(temp)
 	newvalues = pd.concat(newlist)
 	newvalues[str(basefield)] = newvalues['AREA']
-	print '[4/6] Selected new values.'
+	print ('[4/6] Selected new values.')
 
 	# creating bool to slice by
 	basedf['BOOL'] = basedf['GEOHASH'].isin(
@@ -129,7 +130,7 @@ def combine_indexs(fileslist,fieldlist,filename):
 	# combining the created parts to make upperdf and based df
 	upperdf = pd.concat([upperdf,basedf2[['GEOHASH','AREA']]])
 	basedf = pd.concat([basedf1,newvalues])
-	print '[5/6] Created basedf and upperdf'
+	print('[5/6] Created basedf and upperdf')
 
 	for i in fieldlistint:
 		if not i == fieldlistint[-1]:
@@ -141,7 +142,7 @@ def combine_indexs(fileslist,fieldlist,filename):
 	
 	for i in fieldlistint[1:]:
 		basedf['TEXT'] = basedf['TEXT'] + basedf[i]
-	print '[6/6] Creating text field'
+	print('[6/6] Creating text field')
 
 	# finally creating the dictionary object
 	basedf = basedf.set_index('GEOHASH')['TEXT'].to_dict()
