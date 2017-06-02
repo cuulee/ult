@@ -3,12 +3,11 @@ import pandas as pd
 import numpy as np
 import geohash
 import simplejson as json
-from geohash_logic import get_slope,solve_xmin
+from geohash_logic import get_slope
 import os
 import time
-from multiprocessing import Process
+from multiprocessing import Process,cpu_count
 import random
-
 
 # given a point1 x,y and a point2 x,y returns distance in miles
 # points are given in long,lat geospatial cordinates
@@ -25,8 +24,6 @@ def get_cords_json(coords):
 def neighbors_func(ghash):
 	nei = geohash.neighbors(ghash)
 	return '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s' % (ghash,nei[0],ghash,nei[1],ghash,nei[2],ghash,nei[3],ghash,nei[4],ghash,nei[5],ghash,nei[6],ghash,nei[7])
-
-
 
 # returns a set of points that traverse the linear line between two points
 def generate_points_geohash(number_of_points,point1,point2,name,size,currentdist,maxdistance):
@@ -82,9 +79,6 @@ def read_json(filename):
 		return json.load(f)
 
 
-
-
-
 # hopefully a function can be made to properly make into lines
 def fill_geohashs(data,name,size,maxdistance,hashsize):
 	global ghashdict
@@ -106,7 +100,6 @@ def fill_geohashs(data,name,size,maxdistance,hashsize):
 			slope = get_slope(oldrow,row)
 			x1,y1 = oldrow
 			dist = distance(oldrow,row)
-			positions = solve_xmin(oldrow,row,size)
 
 			if dist > hashsize / 5.0 or ind == 0:
 				number = (dist / hashsize) * 5.0
@@ -171,21 +164,6 @@ def make_neighbors(geohashlist,firstlast=False):
 	newlist = np.unique(newlist).tolist()
 	return newlist
 
-def merge_dicts(*dict_args):
-    '''
-    Given any number of dicts, shallow copy and merge into a new dict,
-    precedence goes to key value pairs in latter dicts.
-    '''
-    result = {}
-    size = len(dict_args)
-    count = 0
-    for dictionary in dict_args:
-        result.update(dictionary)
-        count += 1
-        print("[%s/%s]" % (count,size))
-    return result
-
-
 # function that instantiates the make_line_index abstracton
 def helper_func(name,filename,split,appendsize):
 	make_line_index(name,filename,multiprocessing=True,split=split,appendsize=appendsize)
@@ -196,17 +174,14 @@ def make_processes(data,filename,number_of_processes,appendsize):
 
 	# shuffling data to remove uneven split distances sometimes
 	data = data.sample(n=len(data))
-
-
+	
 	extrema = []
 	count = 0
 	processes = []
 	for i in np.array_split(data,number_of_processes):
 		count += 1
 		p = Process(target=helper_func,args=(i,filename,count,appendsize))
-		p.start()
-		with open('process%s.csv' % count,'wb') as b:
-			b.write(b'"GEOHASH","TEXT"')		
+		p.start()	
 		print 'Started Process %s' % count
 		processes.append(p)
 
@@ -222,8 +197,6 @@ def make_processes(data,filename,number_of_processes,appendsize):
 		if runind == True:
 			ind = False
 
-
-
 	# making lines mask for no reason
 	linemask1,linemask2 = make_line_mask(data)
 
@@ -234,42 +207,148 @@ def make_processes(data,filename,number_of_processes,appendsize):
 	# writing output to h5 file
 	if not filename == False:
 		with pd.HDFStore(filename) as out:
-			out['combined'] = df
-			out['alignmentdf'] = data
 			count = 0
-			data = []
+			data_neighbors = []
+			data_alignment = []
 			for i in processes:
 				count += 1
-				csvfilename = 'process%s.csv' % count
-				data.append(pd.read_csv(csvfilename))
-				os.remove(csvfilename)
-			out['ultindex'] = pd.concat(data,ignore_index=True)
+				csvfilenamealignment,csvfilenameneighbor = 'process%sa.csv' % count,'process%sn.csv' % count
+				tempn,tempa = pd.read_csv(csvfilenameneighbor),pd.read_csv(csvfilenamealignment)
+				tempn['BOOL'] = False
+				tempa['BOOL'] = True
+				data_neighbors.append(tempn)
+				data_alignment.append(tempa)
+				os.remove(csvfilenamealignment)
+				os.remove(csvfilenameneighbor)
+			
+			out['combined'] = pd.concat(data_neighbors,ignore_index=True)
+			out['alignmentdf'] = pd.concat(data_alignment,ignore_index=True)
 
 
 
+			out['ultindex'] = pd.concat([out['combined'],out['alignmentdf']],ignore_index=True)
+
+#returns a list with geojson in the current directory
+def get_filetype(src,filetype):
+	filetypes=[]
+	for dirpath, subdirs, files in os.walk(os.getcwd()+'/'+src):
+	    for x in files:
+	        if x.endswith('.'+str(filetype)):
+	        	filetypes.append(src+'/'+x)
+	return filetypes
+
+def remove_process_files():
+	# getting csv files
+	files = get_filetype('','csv')
+	
+	# getting only csv process files
+	files = [i[1:] for i in files if '/' not in i[1:] and 'process' == i[1:8]]
+	
+	# removing all csv process files
+	for i in files:
+		os.remove(i)
+
+# most of the mainline processes is done here
+# where neighbors and alignments are created and drawn to uniques only
+# this hiearchy is then written into a file structure to maintain this hiearchy
+def make_csvs(addgeohashs,csvfilenamealignment,csvfilenameneighbor,split,total,size):
+	aligns = pd.DataFrame(addgeohashs,columns=['GEOHASH','TEXT'])
+	
+	print('Process %s: [%s/%s] dfsize created: %s' % (split,total,size,len(addgeohashs)))
+	
+	addgeohashs = []
+	aligns = aligns.loc[np.unique(aligns['GEOHASH'],return_index=True)[1]]
+
+	# aggregating text
+	aligns['a'] = 'a'
+	totalneighbors = pd.DataFrame(str.split(aligns.groupby('a')['GEOHASH'].apply(lambda x: '|'.join(['|'.join(['|'.join(['%s,%s' % (ii,i) for i in geohash.neighbors(ii)])]) for ii in x.values]))['a'],'|'),columns=['TEXT'])
+
+	# slicing the text field to get the appropriate geohashs
+	totalneighbors['NEIGHBORS'] = totalneighbors['TEXT'].str[10:]
+
+	# doing total neighbors
+	totalneighbors = totalneighbors.loc[np.unique(totalneighbors['NEIGHBORS'],return_index=True)[1]]
+
+	# mapping the text to the neighboriing geohashs
+	totalneighbors['TEXT'] = aligns.set_index('GEOHASH').loc[totalneighbors['TEXT'].str[:9]]['TEXT'].values
+	aligns['TEXT'] = aligns['TEXT'].str[10:]
+	totalneighbors['TEXT'] = totalneighbors['TEXT'].str[10:]
+
+	# renaming neighbors headers
+	totalneighbors = totalneighbors[['NEIGHBORS','TEXT']]
+	totalneighbors.columns = ['GEOHASH','TEXT']
+
+	# exporting / appending both types to csv
+	with open(csvfilenameneighbor,'a') as f:
+		f.write('\n'+totalneighbors[['GEOHASH','TEXT']].to_csv(index=False,mode=str,header=False))
+	
+	# exporting / appending to csv
+	with open(csvfilenamealignment,'a') as f:
+		f.write('\n'+aligns[['GEOHASH','TEXT']].to_csv(index=False,mode=str,header=False))	
 
 
+# makes a line index in its entirety
+# processes is kwarg for how many process will run concurrently
+# appendsize is for how large the size in which to append will be for each chunk
+def make_line_index(data,h5filename,multiprocessing=False,split=1,processes=1,appendsize=5000,gidheader='gid'):
+	# renaming columns
+	gidbool = False
+	newlist = []
 
+	# checking to see if gid exists
+	for row in data.columns:
+		if row == gidheader:
+			gidbool = True
+			newlist.append('gid')
+		else:
+			newlist.append(row)
+	
+	# creating new column list
+	data.columns = newlist
 
-def make_line_index(data,h5filename,multiprocessing=False,split=1,processes=1,appendsize=5000):
+	# making the default number of processing for the platform
+	if processes == 1 and multiprocessing == False:
+		processes = cpu_count()
+
 	if not processes == 1:
 		multiprocessing = True
+		
+		# logic for making gid non comma separated
+		data['BOOL'] = data.gid.astype(str).str.contains('[',regex=False)
+		if not len(data[data['BOOL'] == True]) == 0:
+			newlist = []
+			for i in data['gid'].values:
+				if '[' in i:
+					i = i[1:-1]
+					i = i.replace(' ','')
+					i = str.split(i,',')
+					i = '|'.join(i)
+				newlist.append(i)
+			data['gid'] = newlist
+
+		# removing processfiles
+		remove_process_files()
+
 		print('Creating multiple processes.')
 		make_processes(data,h5filename,processes,appendsize)
+		
 		return []
 
-	csvfilename = 'process%s.csv' % split
+	csvfilenamealignment = 'process%sa.csv' % split
+	csvfilenameneighbor = 'process%sn.csv' % split
+
+	with open(csvfilenamealignment,'wb') as b:
+		b.write(b'"GEOHASH","TEXT"')
+
+	with open(csvfilenameneighbor,'wb') as b:
+		b.write(b'"GEOHASH","TEXT"')
+
 
 	try:
 		os.remove(h5filename)
 	except:
 		pass
 
-	gidbool = False
-	# checking to see if gid exists
-	for row in data.columns:
-		if row == 'gid':
-			gidbool = True
 
 	coordbool = False
 	# checking to see if gid exists
@@ -281,11 +360,20 @@ def make_line_index(data,h5filename,multiprocessing=False,split=1,processes=1,ap
 
 	# getting maxdistance if applicable
 	maxdistance = False
+	maxdistancebool = False
 	for i in data.columns:
 		if 'maxdistance' in str(i).lower():
 			maxdistanceheader = i
 			maxdistancebool = True
 
+	# adding the correct maxdistance field
+	if maxdistancebool == False:
+		newlist = []
+		for i in data['coords'].values:
+			newlist.append(get_max_distance(get_cords_json(i)))
+		data['maxdistance'] = newlist
+		maxdistancebool = True
+		maxdistanceheader = 'maxdistance'
 
 	# logic for zipping together right obects
 	if gidbool == True:
@@ -330,9 +418,6 @@ def make_line_index(data,h5filename,multiprocessing=False,split=1,processes=1,ap
 	total = 0
 	count = 0
 	msgsize = 0
-	jsonfilename = str.split(h5filename,'.')[0] + '.csv'
-
-
 
 	for gid,coords,maxdistance in iterdata:
 		coords = get_cords_json(coords)
@@ -341,76 +426,12 @@ def make_line_index(data,h5filename,multiprocessing=False,split=1,processes=1,ap
 		if count == appendsize:
 			count = 0
 			total += appendsize
-			aligns = pd.DataFrame(addgeohashs,columns=['GEOHASH','TEXT'])
-			
-
-			print('Process %s: [%s/%s] dfsize created: %s' % (split,total,size,len(addgeohashs)))
-			
-
+			make_csvs(addgeohashs,csvfilenamealignment,csvfilenameneighbor,split,total,size)	
 			addgeohashs = []
-			msgsize += 1
-			#aligns['value'] = aligns[['LINEID','DISTANCE','PERCENT']].values.tolist()
-			#aligns['NEIGHBORS'] = aligns['GEOHASH'].map(lambda x:'|'.join(['%s,%s' % (x,i) for i in geohash.neighbors(x)]))
-			aligns = aligns.loc[np.unique(aligns['GEOHASH'],return_index=True)[1]]
-			#aligns['GEOHASH'] = aligns.index
 
-			# aggregating text
-			aligns['a'] = 'a'
-			#totalneighbors = aligns.groupby('a')['GEOHASH'].apply(lambda x: '|'.join(['|'.join(['|'.join(['%s,%s' % (ii,i) for i in geohash.neighbors(ii)])]) for ii in x.values]))['a']
-			totalneighbors = pd.DataFrame(str.split(aligns.groupby('a')['GEOHASH'].apply(lambda x: '|'.join(['|'.join(['|'.join(['%s,%s' % (ii,i) for i in geohash.neighbors(ii)])]) for ii in x.values]))['a'],'|'),columns=['TEXT'])
-
-			# slicing the text field to get the appropriate geohashs
-			totalneighbors['NEIGHBORS'] = totalneighbors['TEXT'].str[10:]
-
-			# doing total neighbors
-			totalneighbors = totalneighbors.loc[np.unique(totalneighbors['NEIGHBORS'],return_index=True)[1]]
-
-			# mapping the text to the neighboriing geohashs
-			totalneighbors['TEXT'] = aligns.set_index('GEOHASH').loc[totalneighbors['TEXT'].str[:9]]['TEXT'].values
-			#totalneighbors = totalneighbors.groupby('NEIGHBORS').first()
-			#totalneighbors = totalneighbors['TEXT'].to_json(orient='index')
-			#print(totalneighbors[['NEIGHBORS','TEXT']].to_csv(index=False,header=False,mode=str)+'\n'+aligns[['GEOHASH','TEXT']].to_csv(index=False,header=False,mode=str))
-			
-			aligns['TEXT'] = aligns['TEXT'].str[10:]
-			totalneighbors['TEXT'] = totalneighbors['TEXT'].str[10:]
-			with open(csvfilename,'a') as f:
-				f.write('\n'+totalneighbors[['NEIGHBORS','TEXT']].to_csv(index=False,header=False,mode=str)+'\n'+aligns[['GEOHASH','TEXT']].to_csv(index=False,header=False,mode=str))	
-
-
-
-	
+	# appending add geohashs that are left over from the last append size
 	if not count == 0:
-		aligns = pd.DataFrame(addgeohashs,columns=['GEOHASH','TEXT'])
-		print('Process %s: [%s/%s] dfsize created: %s' % (split,total,size,len(addgeohashs)))
-		addgeohashs = []
-		msgsize += 1
-		#aligns['value'] = aligns[['LINEID','DISTANCE','PERCENT']].values.tolist()
-		#aligns['NEIGHBORS'] = aligns['GEOHASH'].map(lambda x:'|'.join(['%s,%s' % (x,i) for i in geohash.neighbors(x)]))
-		aligns = aligns.loc[np.unique(aligns['GEOHASH'],return_index=True)[1]]
-		#aligns['GEOHASH'] = aligns.index
-
-		# aggregating text
-		aligns['a'] = 'a'
-		#totalneighbors = aligns.groupby('a')['GEOHASH'].apply(lambda x: '|'.join(['|'.join(['|'.join(['%s,%s' % (ii,i) for i in geohash.neighbors(ii)])]) for ii in x.values]))['a']
-		totalneighbors = pd.DataFrame(str.split(aligns.groupby('a')['GEOHASH'].apply(lambda x: '|'.join(['|'.join(['|'.join(['%s,%s' % (ii,i) for i in geohash.neighbors(ii)])]) for ii in x.values]))['a'],'|'),columns=['TEXT'])
-
-		# slicing the text field to get the appropriate geohashs
-		totalneighbors['NEIGHBORS'] = totalneighbors['TEXT'].str[10:]
-
-		# doing total neighbors
-		totalneighbors = totalneighbors.loc[np.unique(totalneighbors['NEIGHBORS'],return_index=True)[1]]
-
-		# mapping the text to the neighboriing geohashs
-		totalneighbors['TEXT'] = aligns.set_index('GEOHASH').loc[totalneighbors['TEXT'].str[:9]]['TEXT'].values
-		aligns['TEXT'] = aligns['TEXT'].str[10:]
-		totalneighbors['TEXT'] = totalneighbors['TEXT'].str[10:]
-
-		#totalneighbors = totalneighbors.groupby('NEIGHBORS').first()
-		#totalneighbors = totalneighbors['TEXT'].to_json(orient='index')
-		#print(totalneighbors[['NEIGHBORS','TEXT']].to_csv(index=False,header=False,mode=str)+'\n'+aligns[['GEOHASH','TEXT']].to_csv(index=False,header=False,mode=str))
-		with open(csvfilename,'a') as f:
-			f.write('\n'+totalneighbors[['NEIGHBORS','TEXT']].to_csv(index=False,header=False,mode=str)+'\n'+aligns[['GEOHASH','TEXT']].to_csv(index=False,header=False,mode=str))	
-
+		make_csvs(addgeohashs,csvfilenamealignment,csvfilenameneighbor,split,size,size)	
 
 	if multiprocessing == False:
 		# making lines mask for no reason
@@ -433,54 +454,6 @@ def make_line_index(data,h5filename,multiprocessing=False,split=1,processes=1,ap
 		print('\t- ultindex (type: dict)')
 		print('\t- metadata (type: dict)')
 
-
-# for a given set of coordinates 
-# iterates through each set of points in a line
-# and windows through grabbing midpoints on the way
-def expand_out(coords,hashsize,name,maxdistance):	
-	# setting initial distance
-	dist = 0.
-
-	# lines
-	lats = []
-	longs = []
-	dists = []
-
-	count = 0
-	for long,lat in coords:
-		if count == 0:
-			count = 1
-		else:
-			# getting distance about two points
-			dist = dist + distance([oldlong,oldlat],[long,lat])
-			
-			# getting the number points to iterate through
-			number = (int(dist / hashsize) *2) + 2
-			if count == 1:
-				count = 2
-			
-			ptlats = np.linspace(oldlat,lat,number)
-			ptlongs = np.linspace(oldlong,long,number)
-			distances = np.linspace(old_dist,dist,number)
-			
-			# appending all the outerlist additions
-			lats.append(ptlats)
-			longs.append(ptlongs)
-			dists.append(distances)
-		oldlong,oldlat,old_dist = long,lat,dist
-	
-	lats,longs,dists = np.concatenate(tuple(lats)),np.concatenate(tuple(longs)),np.concatenate(tuple(dists))
-			
-	my_func = np.vectorize(geohash.encode,excluded=['precision'])
-	ghashs = my_func(latitude=lats,longitude=longs,precision=9)
-
-
-	# getting unique indicies
-	indexes = np.unique(ghashs, return_index=True)[1]
-	ghashs = np.column_stack((lats,longs,dists,ghashs))
-	ghashs = [ghashs[index] for index in sorted(indexes)]
-	
-	return [[i[-1],'%s,%s,%s,%s' % (i[-1],name,i[-2],maxdistance)] for i in ghashs]
 
 # maps the points and distances about a gien
 # ultindex output (i.e. adds distance and lineid columns)
@@ -515,44 +488,3 @@ def get_max_distance(coords):
 			totaldistance += dist
 		oldpoint = point
 	return totaldistance
-'''
-import mapkit as mk
-import pandas as pd
-import time
-from ult.polygon_dict import get_filetype
-counter = 0
-for i in get_filetype('csv','csv')[1:]:
-	filename = i
-	counter += 1
-	print counter
-	#data = mk.get_database('routes')
-	try:
-		data = pd.read_csv(i)
-	except:
-		data = []
-	hdfilename = 'indexs/' + i[4:-3] + 'h5'
- 	newlist = []
-	if not len(data) == 0:
-		for i in data['osmid']:
-			if '[' == str(i)[0] and ']' == str(i)[-1]:
-				i = sum([int(i) for i in str.split(i[1:-1],',')])
-			newlist.append(i)
-
-		data['gid'] = newlist
-		data['LINEID'] = newlist
-		newlist = []
-		for i in data['coords'].values:
-			newlist.append(get_max_distance(get_cords_json(i)))
-		data['maxdistance'] = newlist
-
-		data.to_csv('new/' + str.split(str(filename),'/')[1],index=False)
-		s = time.time()
-		print hdfilename
-		make_line_index(data,str(hdfilename),processes=8,appendsize=250)
-		print(time.time() - s)
-
-
-mk.cln()
-mk.make_map(alignmentdf,'')
-mk.a()
-'''

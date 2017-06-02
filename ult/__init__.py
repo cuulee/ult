@@ -1,5 +1,6 @@
 from .polygon_dict import make_polygon_index,area_index,readh 
 from .line_index import make_line_index,line_index,make_line_indexdf
-from geohash_logic import add_end,  add_hashtable,  add_prefix,  addhash,  addpostfix,  addprefix,  color_table,  combine_two,  create_interval_table,  distance,  edge,  first,  geohash_delta,  geohash_ghash,  get_area,  get_area_complete,  get_centroid,  get_corner,  get_hashsize,  get_index,  get_initial_size,  get_shift,  get_slope,  get_tang,  get_xy,  linear_cut,  make_area,  make_bool,  make_df_bool,  make_hashtable,  make_hashtable_range,  make_shade,  multi_index,  multi_index_single,  orienation_logic,  reverse_df,  shade,  solve_xmin
-from pipegeohash import df2list,  geohash_linted,  geohash_table,  get_alignment_geohash,  get_points_geohash,  latval,  list2df,  longval,  make_geohash_point,  map_table,  map_table_new,  my_encode,  perform_outer_operation,  points_from_geohash,  random_points_extrema
+from generate_geohashs import *
+from geohash_logic_main import *
+from pipegeohash import *
 from merge_indexs import combine_indexs,make_test_block

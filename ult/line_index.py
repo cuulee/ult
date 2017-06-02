@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import geohash
 import simplejson as json
-from geohash_logic import get_slope,solve_xmin
+from geohash_logic import get_slope
 import os
 import time
 from multiprocessing import Process,cpu_count
@@ -100,7 +100,6 @@ def fill_geohashs(data,name,size,maxdistance,hashsize):
 			slope = get_slope(oldrow,row)
 			x1,y1 = oldrow
 			dist = distance(oldrow,row)
-			positions = solve_xmin(oldrow,row,size)
 
 			if dist > hashsize / 5.0 or ind == 0:
 				number = (dist / hashsize) * 5.0
@@ -208,8 +207,6 @@ def make_processes(data,filename,number_of_processes,appendsize):
 	# writing output to h5 file
 	if not filename == False:
 		with pd.HDFStore(filename) as out:
-			out['combined'] = df
-			out['alignmentdf'] = data
 			count = 0
 			data_neighbors = []
 			data_alignment = []
@@ -223,8 +220,13 @@ def make_processes(data,filename,number_of_processes,appendsize):
 				data_alignment.append(tempa)
 				os.remove(csvfilenamealignment)
 				os.remove(csvfilenameneighbor)
+			
+			out['combined'] = pd.concat(data_neighbors,ignore_index=True)
+			out['alignmentdf'] = pd.concat(data_alignment,ignore_index=True)
 
-			out['ultindex'] = pd.concat(data_alignment+data_neighbors,ignore_index=True).groupby('GEOHASH').first().reset_index()
+
+
+			out['ultindex'] = pd.concat([out['combined'],out['alignmentdf']],ignore_index=True)
 
 #returns a list with geojson in the current directory
 def get_filetype(src,filetype):
